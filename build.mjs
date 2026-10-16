@@ -29,7 +29,8 @@ const PATCH_DIR = join(HERE, 'patches');
 
 // 修改後的原始碼公開的位置（AGPL 第 13 條：讓使用者取得），顯示在每頁頁尾
 const SOURCE_URL = 'https://github.com/cmurx/pdf-tool-source';
-const SOURCE_RAW = 'https://raw.githubusercontent.com/cmurx/pdf-tool-source/main';
+// 用 API 讀（raw.githubusercontent.com 有約 5 分鐘快取，剛 push 完比對會誤報；未登入每小時 60 次，夠用）
+const SOURCE_API = 'https://api.github.com/repos/cmurx/pdf-tool-source/contents';
 // 公開 repo 放的檔案（export-source 匯出、建置時比對）；Worker 與指南不是 BentoPDF 的衍生作品，不放
 const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json'];
 
@@ -131,7 +132,7 @@ async function checkPublicSource() {
   const differ = [];
   for (const rel of local) {
     try {
-      const res = await fetch(`${SOURCE_RAW}/${rel}`, { cache: 'no-store' });
+      const res = await fetch(`${SOURCE_API}/${rel}?ref=main`, { headers: { Accept: 'application/vnd.github.raw' } });
       const mine = readFileSync(join(HERE, ...rel.split('/')), 'utf8').replace(/\r\n/g, '\n');
       if (!res.ok || (await res.text()).replace(/\r\n/g, '\n') !== mine) differ.push(rel);
     } catch {
