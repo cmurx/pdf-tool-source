@@ -37,6 +37,7 @@ const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-file
 const BUILD_ENV = {
   SIMPLE_MODE: 'true',              // 自架版首頁，拿掉行銷區塊
   DISABLE_GITHUB_STARS: 'true',     // 不呼叫 api.github.com
+  SITE_URL: 'https://pdf.cmu.tw',   // 各頁的 canonical、多語系連結；上游預設指向 bentopdf.com
   VITE_DEFAULT_LANGUAGE: 'zh-TW',   // 預設繁體中文，介面可切換英文等語言
   VITE_BRAND_NAME: 'PDF 工具箱',     // 2026-10-16 系統負責人決定
   VITE_FOOTER_TEXT: `以 BentoPDF（AGPL-3.0）建置，修改的原始碼：${SOURCE_URL}`,
