@@ -24,7 +24,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const upstream = readJson(join(HERE, 'upstream.json'));
@@ -39,7 +39,9 @@ const SOURCE_URL = 'https://github.com/cmurx/pdf-tool-source';
 // 用 API 讀（raw.githubusercontent.com 快取約 5 分鐘，API 約 1 分鐘；未登入每小時 60 次，夠用）
 const SOURCE_API = 'https://api.github.com/repos/cmurx/pdf-tool-source/contents';
 // 公開 repo 放的檔案（export-source 匯出、建置時比對）；Worker 與指南不是 BentoPDF 的衍生作品，不放
-const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json', 'security-headers.json'];
+const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json', 'security-headers.json', 'i18n/translate.js', 'i18n/zh-TW.json', 'i18n/scan.mjs'];
+// 上游寫死的英文介面 → 繁中的對照表（指南第 7 節「繁中介面」）
+const I18N_DIR = join(HERE, 'i18n');
 
 // 建置設定（上游的 VITE_* 與建置旗標）。WASM 等資源用相對路徑，同一份輸出在本機與正式站都能用。
 const BUILD_ENV = {
@@ -100,6 +102,7 @@ else if (cmd === 'dev') dev();
 else if (cmd === 'paths') printPaths();
 else if (cmd === 'export-source') exportSource(process.argv[3]);
 else if (cmd === 'latest-upstream') latestUpstream();
+else if (cmd === 'i18n-scan') await i18nScan();
 else fail(`不認得的指令：${cmd}`);
 
 // ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ async function build() {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   renameSync(join(SRC, 'dist'), ASSETS_DIR);
+  const i18nMissing = await addUiTranslation();
   await addExternalAssets(pkg);
   const removed = removePrecompressed(ASSETS_DIR);
   moveLargeFilesToR2();
@@ -142,6 +146,9 @@ async function build() {
 
   log(`完成：${upstream.tag}（${upstream.commit.slice(0, 7)}），${Math.round((Date.now() - t0) / 1000)} 秒`);
   log(`靜態檔 ${files.length} 個、${mb(total)} MB；刪除預先壓縮副本 ${removed} 個；R2 大檔 ${r2List.length} 個`);
+  if (i18nMissing) {
+    console.warn(`[pdf-tool] 提醒：上游有 ${i18nMissing} 條英文介面文字還不在 i18n/zh-TW.json（會照樣顯示英文）。node build.mjs i18n-scan 列出來，翻好併進對照表`);
+  }
   await checkPublicSource();
   printPaths();
 }
@@ -172,7 +179,10 @@ function exportSource(dir) {
   if (dir.toLowerCase().includes('onedrive')) fail('公開 repo 的資料夾不要放在 OneDrive 裡（.git 會被同步）');
   mkdirSync(join(dir, 'patches'), { recursive: true });
   for (const f of readdirSync(join(dir, 'patches'))) if (f.endsWith('.patch')) rmSync(join(dir, 'patches', f));
-  for (const rel of PUBLIC_FILES) cpSync(join(HERE, rel), join(dir, rel));
+  for (const rel of PUBLIC_FILES) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    cpSync(join(HERE, rel), join(dir, rel));
+  }
   for (const p of listPatches()) cpSync(join(PATCH_DIR, p), join(dir, 'patches', p));
   cpSync(join(PATCH_DIR, 'README.md'), join(dir, 'patches', 'README.md'));
   const license = join(SRC, 'LICENSE');
@@ -195,6 +205,7 @@ function publicReadme() {
 1. [\`patches/\`](patches/) 的補丁（說明見 [patches/README.md](patches/README.md)）。
 2. 把上游 \`public/libreoffice-wasm/browser.worker.global.js\` 換成 \`node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js\`（上游內附的舊版不支援注入字型）。
 3. [\`build.mjs\`](build.mjs) 開頭 \`BUILD_ENV\` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [\`security-headers.json\`](security-headers.json) 產生的安全標頭。
+4. [\`i18n/\`](i18n/)：上游寫死、沒走翻譯系統的英文介面換成繁體中文。\`build.mjs\` 把對照表 \`zh-TW.json\` 嵌進 \`translate.js\`，放在每個頁面 \`<head>\` 的第一個 script；介面語言是繁體中文時，畫面文字整段等於對照表的英文才換。\`scan.mjs\` 找出還沒翻的英文。
 
 ## 重現
 
@@ -282,6 +293,51 @@ function syncLibreOfficeWorker() {
   cpSync(installed, vendored);
   const ver = readJson(join(SRC, 'node_modules', '@matbee', 'libreoffice-converter', 'package.json')).version;
   log(`LibreOffice worker 換成 @matbee/libreoffice-converter ${ver} 的版本（支援字型注入）`);
+}
+
+// 上游寫死、沒走翻譯系統的英文介面換成繁中（指南第 7 節）：對照表嵌進 i18n/translate.js，放進繁中與不帶語言的頁面 <head> 的第一個 script。
+// 檔名帶內容雜湊：Service Worker 對 .js 是有快取就不再下載，對照表改了要換檔名使用者才拿得到新版。
+// 回傳還沒翻的候選數（只提醒不擋）
+async function addUiTranslation() {
+  const { compile, scan, missing, UNLINKED_PAGES } = await import(pathToFileURL(join(I18N_DIR, 'scan.mjs')).href);
+  const dict = readJson(join(I18N_DIR, 'zh-TW.json'));
+  const runtime = readFileSync(join(I18N_DIR, 'translate.js'), 'utf8');
+  const MARK = '/*__DICT__*/ null';
+  if (!runtime.includes(MARK)) fail('i18n/translate.js 找不到對照表的位置標記');
+  // JSON 嵌進 script：</ 與 U+2028／2029 先跳脫
+  const json = JSON.stringify(compile(dict)).replace(/</g, '\\u003c').replace(new RegExp('[' + String.fromCharCode(0x2028, 0x2029) + ']', 'g'), (c) => '\\u' + c.charCodeAt(0).toString(16));
+  // 取代內容用函式傳入：用字串的話，JSON 裡的 $$、$&、$' 會被當成取代符號
+  const code = runtime.replace(MARK, () => json);
+  const name = `zh-tw-ui-${createHash('sha256').update(code).digest('hex').slice(0, 8)}.js`;
+  writeFileSync(join(ASSETS_DIR, 'assets', name), code);
+  const tag = `<script defer src="/assets/${name}"></script>`;
+  let pages = 0;
+  for (const f of listFiles(ASSETS_DIR)) {
+    // 只放進 /zh-TW/ 與不帶語言的頁面（後者依使用者的語言設定可能是繁中）；其他語言的頁面用不到。
+    // 子資料夾的頁面（PDF.js 檢視器等）有自己的翻譯，也不要碰它的文字層；上游官網頁面不翻（i18n/scan.mjs 的 UNLINKED_PAGES）
+    const m = /^(?:zh-TW\/)?([^/]+\.html)$/.exec(f.rel);
+    if (!m || UNLINKED_PAGES.includes(m[1])) continue;
+    const html = readFileSync(f.path, 'utf8');
+    const head = html.match(/<head(\s[^>]*)?>/i);
+    // 沒有 <head> 的多半是片段或轉址頁，跳過並提醒，不讓整個建置失敗
+    if (!head) { console.warn(`[pdf-tool] 提醒：${f.rel} 沒有 <head>，沒放繁中介面的程式`); continue; }
+    writeFileSync(f.path, html.replace(head[0], () => `${head[0]}${tag}`));
+    pages++;
+  }
+  const found = scan(SRC, ASSETS_DIR);
+  const left = missing(found, dict);
+  log(`繁中介面對照表：${Object.keys(dict.strings).length} 條字串、${Object.keys(dict.templates || {}).length} 條句型，放進 ${pages} 個頁面（${name}）`);
+  return left.strings.length + left.templates.length;
+}
+
+async function i18nScan() {
+  if (!existsSync(join(ASSETS_DIR, 'index.html')) || !existsSync(SRC)) fail('還沒建置，先跑 node build.mjs');
+  const { scan, missing } = await import(pathToFileURL(join(I18N_DIR, 'scan.mjs')).href);
+  const left = missing(scan(SRC, ASSETS_DIR), readJson(join(I18N_DIR, 'zh-TW.json')));
+  const out = join(WORK, 'i18n-missing.json');
+  writeFileSync(out, JSON.stringify(left, null, 1) + '\n');
+  log(`還沒翻的：字串 ${left.strings.length} 條、句型 ${left.templates.length} 條，寫在 ${out}`);
+  log('翻好的放進 i18n/zh-TW.json 的 strings／templates，不是介面文字的放 ignore');
 }
 
 // 上游預設在使用時才從 jsDelivr 等 CDN 抓的資源，改成建置時下載、跟網站一起部署（指南第 2.2 節）
