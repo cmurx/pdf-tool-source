@@ -1,5 +1,5 @@
 // PDF工具：CMURx 品牌與首頁的快速操作引導（指南第 1.2 節 A、第 8 節）。build.mjs 放進每個最上層的頁面（defer）。
-// - 導覽列的網站名稱下面加小字「CMURx」
+// - 導覽列的網站名稱下面加小字「CMURx」；右邊顯示目前登入的帳號與「登出」
 // - 首頁（有 #tools-header）在搜尋框下面加「第一次用 PDF 工具箱？」：只在繁體中文介面顯示，按關閉後這台裝置不再顯示
 // 圖示照共用前端規範用 Lucide（0.469.0 的 lightbulb、x），行內 SVG。
 (function () {
@@ -72,8 +72,32 @@
     anchor.after(box);
   }
 
+  // 導覽列右邊：目前登入的帳號＋登出（帳號向 /auth/me 問；cookie 是 HttpOnly，網頁讀不到）
+  function account() {
+    var row = document.querySelector('nav[data-simple-nav] .h-16');
+    if (!row || document.getElementById('cmurx-account')) return;
+    var box = el('div', { id: 'cmurx-account', class: 'cmurx-account' });
+    row.appendChild(box);
+    fetch('/auth/me', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.email) return;
+        box.append(
+          el('span', { class: 'cmurx-account-email', title: data.email }, [
+            icon(['M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2', 'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z']),
+            el('span', { class: 'visually-hidden' }, ['目前登入：']),
+            el('span', { class: 'cmurx-account-text' }, [data.email]),
+          ]),
+          // 寫完整網址：上游的 rewriteLinks() 會把 / 開頭的連結加上語言前綴（/zh-TW/auth/logout 就找不到了），完整網址它不動
+          el('a', { class: 'cmurx-account-logout', href: location.origin + '/auth/logout' }, [icon(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9']), '登出']),
+        );
+      })
+      .catch(function () { /* 拿不到就不顯示，不影響使用 */ });
+  }
+
   function run() {
     brandSub();
+    account();
     guide();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);

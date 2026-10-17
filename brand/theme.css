@@ -222,3 +222,69 @@ body {
     margin-inline: 0;
   }
 }
+
+/* 導覽列右邊：目前登入的帳號＋登出 */
+.cmurx-account {
+  margin-left: auto;
+  padding-left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cmurx-account svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cmurx-account-email {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--color-gray-400);
+}
+.cmurx-account-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28ch;
+}
+.cmurx-account-logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--color-gray-600);
+  border-radius: 10px;
+  color: var(--color-gray-200);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.cmurx-account-logout:hover {
+  background: var(--color-gray-700);
+  color: var(--color-gray-50);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* 手機：帳號太長就截斷（滑過或長按看得到完整的），登出按鈕保留 */
+@media (max-width: 640px) {
+  .cmurx-account-text {
+    max-width: 30vw;
+  }
+}
