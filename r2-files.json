@@ -1,5 +1,6 @@
 {
-  "說明": "超過 Workers 靜態檔單檔上限（25 MiB）、改放 R2 的檔案。build.mjs 會核對實際超過上限的檔案跟這份清單一致，不一致就停下來；Worker 照這份清單決定哪些路徑從 R2 讀。R2 的 key 是「<upstream.json 的 tag>/<路徑>」。",
+  "說明": "超過 Workers 靜態檔單檔上限（25 MiB）、改放 R2 的檔案。build.mjs 核對實際超過上限的檔案跟這份清單一致，也核對 worker/wrangler.jsonc 的 bucket 名稱與 run_worker_first 跟這裡一致；Worker 照這份清單決定哪些路徑從 R2 讀。R2 的 key 是「<upstream.json 的 tag>/<路徑>」。",
+  "bucket": "cmu-pdf-tool-assets",
   "files": [
     "libreoffice-wasm/soffice.data.gz",
     "libreoffice-wasm/soffice.wasm.gz"

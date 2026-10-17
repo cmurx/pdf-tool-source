@@ -6,9 +6,13 @@
 //   node build.mjs --update-lock  外部下載的檔案雜湊跟 assets-lock.json 不同時，確認過再用這個更新
 //   node build.mjs dev            把 R2 大檔放進本機 R2，開 wrangler dev（127.0.0.1:8799）
 //   node build.mjs paths          印出工作資料夾與部署、上傳 R2 要用的指令
-//   node build.mjs export-source <資料夾>  把要公開的修改原始碼（補丁、建置腳本、版本檔、授權）匯出到公開 repo 的本機資料夾
+//   node build.mjs export-source <資料夾>  把要公開的修改原始碼（補丁、建置腳本、設定檔、授權）匯出到公開 repo 的本機資料夾
+//   node build.mjs latest-upstream  印出上游最新的正式版本與 commit（每週檢查流程用）
 //
 // 部署與上傳 R2 刻意不寫進這支腳本：那兩個指令要直接打，Claude Code 的 permissions.ask 才攔得到。
+//
+// 建置會執行上游的程式碼（vite 設定、建置腳本）。為了縮小影響範圍：套件安裝不執行安裝腳本（--ignore-scripts），
+// 子程式只拿到建置需要的環境變數（childEnv），換上游版本前先看過版本說明與程式差異（指南第 9.2 節）。
 //
 // 工作資料夾：環境變數 PDF_TOOL_WORK；沒設時 Windows 用 %LOCALAPPDATA%\pdf-tool-build，其他用 ~/.cache/pdf-tool-build。
 import { spawnSync } from 'node:child_process';
@@ -23,16 +27,18 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const upstream = readJson(join(HERE, 'upstream.json'));
-const r2List = readJson(join(HERE, 'r2-files.json')).files;
+const { bucket: R2_BUCKET, files: r2List } = readJson(join(HERE, 'r2-files.json'));
+const securityHeaders = readJson(join(HERE, 'security-headers.json'));
 const LOCK_PATH = join(HERE, 'assets-lock.json');
 const PATCH_DIR = join(HERE, 'patches');
+const WRANGLER_CONF = join(HERE, 'worker', 'wrangler.jsonc');
 
 // 修改後的原始碼公開的位置（AGPL 第 13 條：讓使用者取得），顯示在每頁頁尾
 const SOURCE_URL = 'https://github.com/cmurx/pdf-tool-source';
-// 用 API 讀（raw.githubusercontent.com 有約 5 分鐘快取，剛 push 完比對會誤報；未登入每小時 60 次，夠用）
+// 用 API 讀（raw.githubusercontent.com 快取約 5 分鐘，API 約 1 分鐘；未登入每小時 60 次，夠用）
 const SOURCE_API = 'https://api.github.com/repos/cmurx/pdf-tool-source/contents';
 // 公開 repo 放的檔案（export-source 匯出、建置時比對）；Worker 與指南不是 BentoPDF 的衍生作品，不放
-const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json'];
+const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json', 'security-headers.json'];
 
 // 建置設定（上游的 VITE_* 與建置旗標）。WASM 等資源用相對路徑，同一份輸出在本機與正式站都能用。
 const BUILD_ENV = {
@@ -53,9 +59,11 @@ const BUILD_ENV = {
   VITE_TESSERACT_AVAILABLE_LANGUAGES: 'chi_tra,eng',
   VITE_OCR_FONT_BASE_URL: '/wasm/ocr/fonts',
   VITE_EMBEDPDF_FONTS_URL: '/wasm/editor-fonts',
-  // 數位簽章的憑證鏈代理：還沒決定，先不設（見指南第 6 節）
+  // 數位簽章的憑證鏈代理：不架（2026-10-16 系統負責人決定，指南第 7 節）
   VITE_CORS_PROXY_URL: '',
 };
+// 子程式（git、npm、上游的建置程式）能拿到的環境變數；其他的（例如權杖）一律不傳
+const CHILD_ENV_KEYS = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|USERNAME|USER|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|OS|LANG|LC_ALL|TERM|CI|NODE_EXTRA_CA_CERTS|HTTPS?_PROXY|NO_PROXY|NPM_CONFIG_[A-Z_]+)$/i;
 const OCR_LANGS = ['chi_tra', 'eng'];
 const OCR_FONTS = ['Noto Sans TC', 'Noto Sans'];
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
@@ -70,6 +78,7 @@ const SRC = join(WORK, `src-${upstream.commit.slice(0, 12)}`);
 const OUT = join(WORK, 'out');
 const ASSETS_DIR = join(OUT, 'assets');
 const R2_DIR = join(OUT, 'r2');
+const INSTALLED_MARK = join(SRC, 'node_modules', '.pdf-tool-installed');
 
 if (HERE.toLowerCase().includes('onedrive') && WORK.toLowerCase().includes('onedrive')) {
   fail(`工作資料夾在 OneDrive 裡（${WORK}），幾百 MB 的建置檔會被同步；請把 PDF_TOOL_WORK 設到 OneDrive 外面`);
@@ -82,12 +91,14 @@ if (cmd === 'build') await build();
 else if (cmd === 'dev') dev();
 else if (cmd === 'paths') printPaths();
 else if (cmd === 'export-source') exportSource(process.argv[3]);
+else if (cmd === 'latest-upstream') latestUpstream();
 else fail(`不認得的指令：${cmd}`);
 
 // ---------------------------------------------------------------------------
 
 async function build() {
   const t0 = Date.now();
+  checkWranglerConfig();
   mkdirSync(WORK, { recursive: true });
   prepareSource();
 
@@ -95,10 +106,10 @@ async function build() {
   syncLibreOfficeWorker();
 
   const pkg = readJson(join(SRC, 'package.json'));
-  const env = { ...process.env, ...BUILD_ENV, npm_package_version: pkg.version };
+  const env = childEnv({ ...BUILD_ENV, npm_package_version: pkg.version });
   rmSync(join(SRC, 'dist'), { recursive: true, force: true });
   // 上游的 npm run build 用 POSIX 的環境變數寫法，Windows 跑不了，所以照它的步驟逐一執行
-  // （略過 sitemap、nginx 安全標頭與 SEO 檢查：這裡用不到，安全標頭由 Worker 加）
+  // （略過 sitemap、nginx 安全標頭與 SEO 檢查：這裡用不到，安全標頭由 _headers 與 Worker 加）
   run('npx', ['tsc'], { cwd: SRC, env });
   run('npx', ['vite', 'build'], { cwd: SRC, env });
   run('node', ['scripts/generate-i18n-pages.mjs'], {
@@ -111,6 +122,7 @@ async function build() {
   await addExternalAssets(pkg);
   const removed = removePrecompressed(ASSETS_DIR);
   moveLargeFilesToR2();
+  writeHeadersFile();
 
   const files = listFiles(ASSETS_DIR);
   const total = files.reduce((s, f) => s + f.size, 0);
@@ -140,7 +152,7 @@ async function checkPublicSource() {
     }
   }
   if (differ.length) {
-    console.warn(`[pdf-tool] 提醒：公開的原始碼（${SOURCE_URL}）跟本機不同：${differ.join('、')}。部署前用 node build.mjs export-source 更新並 push`);
+    console.warn(`[pdf-tool] 提醒：公開的原始碼（${SOURCE_URL}）跟本機不同：${differ.join('、')}。部署前用 node build.mjs export-source 更新並 push（剛 push 完約 1 分鐘內會誤報）`);
   } else {
     log('公開的原始碼跟本機一致');
   }
@@ -173,7 +185,7 @@ function publicReadme() {
 
 1. [\`patches/\`](patches/) 的補丁（說明見 [patches/README.md](patches/README.md)）。
 2. 把上游 \`public/libreoffice-wasm/browser.worker.global.js\` 換成 \`node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js\`（上游內附的舊版不支援注入字型）。
-3. [\`build.mjs\`](build.mjs) 開頭 \`BUILD_ENV\` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供）。
+3. [\`build.mjs\`](build.mjs) 開頭 \`BUILD_ENV\` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [\`security-headers.json\`](security-headers.json) 產生的安全標頭。
 
 ## 重現
 
@@ -183,7 +195,7 @@ function publicReadme() {
 node build.mjs
 \`\`\`
 
-\`build.mjs\` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [\`assets-lock.json\`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 \`out/assets\`（超過 25 MiB 的檔在 \`out/r2\`）。\`build.mjs\` 的 \`dev\`、\`paths\` 指令會用到 \`worker/\`，那是網站的部署設定，不在這個 repo。
+\`build.mjs\` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [\`assets-lock.json\`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 \`out/assets\`（超過 25 MiB 的檔在 \`out/r2\`）。\`build.mjs\` 會核對 \`worker/wrangler.jsonc\`，\`dev\`、\`paths\` 指令也會用到 \`worker/\`；那是網站的部署設定，不在這個 repo，重現建置時可以把 \`checkWranglerConfig()\` 那一行拿掉。
 
 ## 授權
 
@@ -207,7 +219,10 @@ function prepareSource() {
     && git(['rev-parse', 'HEAD'], SRC) === upstream.commit
     && git(['config', '--get', 'core.autocrlf'], SRC) === 'false';
   if (!ok) {
-    rmSync(SRC, { recursive: true, force: true });
+    // 換了上游版本：舊版的原始碼與套件（數百 MB）一起清掉
+    if (existsSync(WORK)) {
+      for (const d of readdirSync(WORK)) if (d.startsWith('src-')) rmSync(join(WORK, d), { recursive: true, force: true });
+    }
     log(`抓上游 ${upstream.tag} 到 ${SRC}`);
     run('git', ['-c', 'advice.detachedHead=false', 'clone', '--config', 'core.autocrlf=false', '--depth', '1', '--branch', upstream.tag, '--quiet', upstream.repo, SRC]);
     const head = git(['rev-parse', 'HEAD'], SRC);
@@ -217,12 +232,18 @@ function prepareSource() {
     }
   } else {
     log(`沿用已抓好的上游原始碼 ${SRC}`);
-    // 上次建置套過的補丁先還原，回到跟上游一模一樣
+    // 上次建置套過的補丁先還原、補丁新增的檔案也清掉（-fd 不含 .gitignore 排除的 node_modules），回到跟上游一模一樣
     run('git', ['checkout', '--quiet', '--', '.'], { cwd: SRC });
+    run('git', ['clean', '-fdq'], { cwd: SRC });
   }
-  const dirty = git(['status', '--porcelain', '--untracked-files=no'], SRC);
-  if (dirty) fail(`上游原始碼有修改，跟 ${upstream.tag} 不一致：\n${dirty}`);
-  if (!existsSync(join(SRC, 'node_modules'))) run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: SRC });
+  const dirty = git(['status', '--porcelain'], SRC);
+  if (dirty) fail(`上游原始碼有修改或多出檔案，跟 ${upstream.tag} 不一致：\n${dirty}`);
+  // 安裝成功才寫標記；中斷過的安裝沒有標記，整個重裝
+  if (!existsSync(INSTALLED_MARK)) {
+    rmSync(join(SRC, 'node_modules'), { recursive: true, force: true });
+    run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: SRC, env: childEnv() });
+    writeFileSync(INSTALLED_MARK, `${upstream.commit}\n`);
+  }
 }
 
 // patches/*.patch 依檔名順序套用。套不上就停：上游可能已經修好（拿掉補丁）或改了寫法（重做補丁）
@@ -275,9 +296,9 @@ async function addExternalAssets(pkg) {
   };
   if (!versions.tesseract || !versions.tesseractCore) fail('package-lock.json 找不到 tesseract.js 的版本');
 
-  // npm 套件：npm pack 會核對 registry 的完整性雜湊
+  // npm 套件：npm pack 會核對 registry 的完整性雜湊，不執行套件的腳本
   const pack = (spec) => {
-    const r = spawnSync('npm', ['pack', spec, '--silent'], { cwd: tmp, shell: true, encoding: 'utf8' });
+    const r = spawnSync('npm', ['pack', spec, '--silent'], { cwd: tmp, shell: true, encoding: 'utf8', env: childEnv() });
     if (r.status !== 0) fail(`npm pack ${spec} 失敗：${r.stderr}`);
     const file = r.stdout.trim().split(/\r?\n/).pop();
     const out = join(tmp, file.replace(/\.tgz$/, ''));
@@ -346,7 +367,7 @@ function moveLargeFilesToR2() {
   const large = listFiles(ASSETS_DIR).filter((f) => f.size > MAX_ASSET_BYTES).map((f) => f.rel).sort();
   const expected = [...r2List].sort();
   if (JSON.stringify(large) !== JSON.stringify(expected)) {
-    fail(`超過 25 MiB 的檔案跟 r2-files.json 不一致。\n實際：${JSON.stringify(large)}\n清單：${JSON.stringify(expected)}\n上游新增或改了大檔：確認後更新 r2-files.json（Worker 也照它決定從 R2 讀）`);
+    fail(`超過 25 MiB 的檔案跟 r2-files.json 不一致。\n實際：${JSON.stringify(large)}\n清單：${JSON.stringify(expected)}\n上游新增或改了大檔：確認後更新 r2-files.json 與 worker/wrangler.jsonc 的 run_worker_first`);
   }
   for (const rel of large) {
     const to = join(R2_DIR, upstream.tag, ...rel.split('/'));
@@ -356,15 +377,33 @@ function moveLargeFilesToR2() {
   }
 }
 
+// 靜態檔由 Cloudflare 直接送出，安全標頭靠 _headers；Worker 只處理 R2 大檔，自己加同一組標頭
+function writeHeadersFile() {
+  // 註解只用英文：這個檔交給 Cloudflare 解析，避免編碼問題
+  const lines = ['# Generated by build.mjs from security-headers.json. Do not edit.', '/*', `  Content-Security-Policy: ${securityHeaders.csp.join('; ')}`];
+  for (const [k, v] of Object.entries(securityHeaders.headers)) lines.push(`  ${k}: ${v}`);
+  if (lines.some((l) => l.length > 2000)) fail('_headers 有一行超過 2,000 字（Cloudflare 的上限）');
+  writeFileSync(join(ASSETS_DIR, '_headers'), lines.join('\n') + '\n');
+}
+
+// wrangler.jsonc 的 bucket 名稱與 run_worker_first 要跟 r2-files.json 一致：不一致時大檔會 404，或全部請求都經過 Worker
+function checkWranglerConfig() {
+  const conf = readFileSync(WRANGLER_CONF, 'utf8');
+  const problems = [];
+  if (!conf.includes(`"bucket_name": "${R2_BUCKET}"`)) problems.push(`bucket_name 不是 ${R2_BUCKET}`);
+  for (const rel of r2List) if (!conf.includes(`"/${rel}"`)) problems.push(`run_worker_first 少了 /${rel}`);
+  if (/"run_worker_first"\s*:\s*true/.test(conf)) problems.push('run_worker_first 不要設成 true（安全標頭改由 _headers 加）');
+  if (problems.length) fail(`worker/wrangler.jsonc 跟 r2-files.json 不一致：${problems.join('；')}`);
+}
+
 function dev() {
   if (!existsSync(ASSETS_DIR)) fail('還沒建置，先跑 node build.mjs');
+  checkWranglerConfig();
   const info = readJson(join(OUT, 'build-info.json'));
   if (info.commit !== upstream.commit) fail(`建置輸出是 ${info.tag}，upstream.json 是 ${upstream.tag}，先重新建置`);
   const worker = join(HERE, 'worker');
-  const conf = readJson(join(worker, 'wrangler.jsonc'), true);
-  const bucket = conf.r2_buckets[0].bucket_name;
   for (const rel of r2List) {
-    run('npx', ['wrangler', 'r2', 'object', 'put', `${bucket}/${upstream.tag}/${rel}`, '--file', join(R2_DIR, upstream.tag, ...rel.split('/')),
+    run('npx', ['wrangler', 'r2', 'object', 'put', `${R2_BUCKET}/${upstream.tag}/${rel}`, '--file', join(R2_DIR, upstream.tag, ...rel.split('/')),
       '--content-type', 'application/octet-stream', '--local'], { cwd: worker });
   }
   log(`本機：http://127.0.0.1:${DEV_PORT}/（埠被佔用時 wrangler 照樣會印 Ready，先確認頁面標題）`);
@@ -376,20 +415,46 @@ function printPaths() {
   log(`靜態檔：${ASSETS_DIR}`);
   log('上傳 R2（每個大檔一次，在 PDF工具/worker 執行；版本沒換就不用重傳）：');
   for (const rel of r2List) {
-    console.log(`  npx wrangler r2 object put cmu-pdf-tool-assets/${upstream.tag}/${rel} --file "${join(R2_DIR, upstream.tag, ...rel.split('/'))}" --content-type application/octet-stream --remote`);
+    console.log(`  npx wrangler r2 object put ${R2_BUCKET}/${upstream.tag}/${rel} --file "${join(R2_DIR, upstream.tag, ...rel.split('/'))}" --content-type application/octet-stream --remote`);
   }
   log('部署（在 PDF工具/worker 執行；先上傳 R2）：');
   console.log(`  npx wrangler deploy --assets "${ASSETS_DIR}"`);
 }
 
+// 上游最新的 vX.Y.Z 正式版。annotated 標籤取 ^{} 那一行（實際的 commit），lightweight 標籤直接取
+function latestUpstream() {
+  const r = spawnSync('git', ['ls-remote', '--tags', upstream.repo], { encoding: 'utf8', env: childEnv() });
+  if (r.status !== 0) fail(`抓不到上游的標籤：${r.stderr}`);
+  const tags = new Map();
+  for (const line of r.stdout.trim().split('\n')) {
+    const [sha, ref] = line.split('\t');
+    const m = ref?.match(/^refs\/tags\/(v\d+\.\d+\.\d+)(\^\{\})?$/);
+    if (m && (m[2] || !tags.has(m[1]))) tags.set(m[1], sha);
+  }
+  if (!tags.size) fail('上游沒有 vX.Y.Z 的標籤');
+  const num = (t) => t.slice(1).split('.').map(Number);
+  const tag = [...tags.keys()].sort((a, b) => {
+    const [x, y] = [num(a), num(b)];
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+  })[0];
+  console.log(`tag=${tag}`);
+  console.log(`commit=${tags.get(tag)}`);
+  console.log(`current=${upstream.tag}`);
+}
+
 // ---------------------------------------------------------------------------
 
+function childEnv(extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (CHILD_ENV_KEYS.test(k)) env[k] = v;
+  return { ...env, ...extra };
+}
 function run(command, args, opts = {}) {
-  const r = spawnSync(command, args, { stdio: 'inherit', shell: process.platform === 'win32', ...opts });
+  const r = spawnSync(command, args, { stdio: 'inherit', shell: process.platform === 'win32', env: childEnv(), ...opts });
   if (r.status !== 0) fail(`${command} ${args.join(' ')} 失敗（${r.status}）`);
 }
 function git(args, cwd) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: childEnv() });
   return r.status === 0 ? r.stdout.trim() : '';
 }
 function listFiles(dir) {
@@ -403,10 +468,8 @@ function listFiles(dir) {
   })(dir);
   return out;
 }
-function readJson(p, jsonc = false) {
-  let text = readFileSync(p, 'utf8').replace(/^﻿/, '');
-  if (jsonc) text = text.replace(/^\s*\/\/.*$/gm, '');
-  return JSON.parse(text);
+function readJson(p) {
+  return JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
 }
 function match(text, re, what) {
   const m = text.match(re);

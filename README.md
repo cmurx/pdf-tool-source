@@ -8,7 +8,7 @@
 
 1. [`patches/`](patches/) 的補丁（說明見 [patches/README.md](patches/README.md)）。
 2. 把上游 `public/libreoffice-wasm/browser.worker.global.js` 換成 `node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js`（上游內附的舊版不支援注入字型）。
-3. [`build.mjs`](build.mjs) 開頭 `BUILD_ENV` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供）。
+3. [`build.mjs`](build.mjs) 開頭 `BUILD_ENV` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [`security-headers.json`](security-headers.json) 產生的安全標頭。
 
 ## 重現
 
@@ -18,7 +18,7 @@
 node build.mjs
 ```
 
-`build.mjs` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [`assets-lock.json`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 `out/assets`（超過 25 MiB 的檔在 `out/r2`）。`build.mjs` 的 `dev`、`paths` 指令會用到 `worker/`，那是網站的部署設定，不在這個 repo。
+`build.mjs` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [`assets-lock.json`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 `out/assets`（超過 25 MiB 的檔在 `out/r2`）。`build.mjs` 會核對 `worker/wrangler.jsonc`，`dev`、`paths` 指令也會用到 `worker/`；那是網站的部署設定，不在這個 repo，重現建置時可以把 `checkWranglerConfig()` 那一行拿掉。
 
 ## 授權
 

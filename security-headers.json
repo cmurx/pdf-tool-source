@@ -1,0 +1,27 @@
+{
+  "說明": "pdf.cmu.tw 所有回應的安全標頭，唯一的正本。build.mjs 產生靜態檔的 _headers，worker/src/index.js 用在 R2 大檔的回應。CSP 照上游 nginx 設定（scripts/generate-security-headers.mjs）拿掉所有外部來源；'unsafe-eval'、'wasm-unsafe-eval'、blob: 是 WASM 與 Web Worker 需要的。COOP／COEP：Office 轉檔（LibreOffice WASM）要 SharedArrayBuffer。SAMEORIGIN：簽名、蓋章工具會用 iframe 嵌自己的檢視器。",
+  "csp": [
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:",
+    "worker-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' blob: data:",
+    "media-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-src 'self' blob:",
+    "frame-ancestors 'self'",
+    "form-action 'self'"
+  ],
+  "headers": {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+  }
+}
