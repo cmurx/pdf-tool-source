@@ -1,0 +1,224 @@
+/*
+ * PDF工具：把上游 BentoPDF 的配色換成 CMURx 共用前端規範的深色主題（共用前端規範第 1.2 節「深色」欄；指南第 8 節）。
+ * 上游用 Tailwind 4，顏色都是 CSS 變數（--color-gray-800 等，定義在 @layer theme）；這裡不放進任何 layer，所以會蓋過上游。
+ * build.mjs 放在每個頁面 </head> 前面（排在上游樣式後面，壓過上游寫死的 body 背景色）。
+ * 上游只有深色版面（大量寫死 text-white、bg-white，PDF 預覽是白頁），規範的紙感淺色不做（2026-10-17 系統負責人選）。
+ * 對比：主要組合都 ≥4.5（白字在主色按鈕 5.9、說明文字在卡片 5.4），2026-10-17 計算。
+ */
+:root {
+  /* 灰階 → 規範深色的暖棕：900 頁面底、800 卡片與導覽列、700 輸入框與次要區塊、600 邊框 */
+  --color-gray-50: #f5efe3;
+  --color-gray-100: #ece2d0;
+  --color-gray-200: #e2d6c0;
+  --color-gray-300: #d4c6ad;
+  --color-gray-400: #a8977c;
+  --color-gray-500: #9d8c71;
+  --color-gray-600: #4f412d;
+  --color-gray-700: #3a2f21;
+  --color-gray-800: #2b2318;
+  --color-gray-900: #211a13;
+  --color-gray-950: #1a140e;
+  /* 靛藍（上游的主色）→ 規範的赭紅：600 是按鈕底（配白字），400 是深色底上的連結與強調 */
+  --color-indigo-50: #fbf0e4;
+  --color-indigo-100: #f5dcc4;
+  --color-indigo-200: #efc6a0;
+  --color-indigo-300: #ebb488;
+  --color-indigo-400: #dd9256;
+  --color-indigo-500: #c8743a;
+  --color-indigo-600: #9c5024;
+  --color-indigo-700: #83421d;
+  --color-indigo-800: #5f3117;
+  --color-indigo-900: #452412;
+  --color-indigo-950: #2e180c;
+  /* 藍色（上游當「資訊」與工作流程分類標題用）→ 規範的 info 色（湖藍） */
+  --color-blue-300: #a3cad8;
+  --color-blue-400: #7bb0c4;
+  --color-blue-500: #5f97ad;
+  --color-blue-600: #436e7e;
+  --color-blue-700: #375b68;
+  /* 字型：規範用系統字型，不另載網路字型（上游的 DM Sans 只有拉丁字母，中文本來就退回系統字型） */
+  --font-sans: -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  color-scheme: dark;
+}
+
+body {
+  /* 上游 styles.css 寫死 #111827／#d1d5db */
+  background-color: var(--color-gray-900);
+  color: var(--color-gray-300);
+  font-family: var(--font-sans);
+}
+
+/* 上游 styles.css 寫死 hex 的地方（不是 Tailwind 變數，要逐條蓋；同樣的選擇器，這個檔排在後面所以會贏） */
+.tool-card,
+.pdf-panel,
+.feature-card,
+.testimonial-card {
+  background-color: var(--color-gray-800);
+  border-color: var(--color-gray-700);
+}
+/* 規範：強調一律往內，不上浮（hover 上浮是第 1 版的寫法，已不再適用） */
+.tool-card:hover {
+  transform: none;
+  border-color: var(--color-indigo-400);
+  box-shadow: inset 0 0 0 1px var(--color-indigo-400);
+}
+.category-header:hover,
+.category-header:hover .category-chevron,
+.faq-item.open .faq-question {
+  color: var(--color-indigo-400);
+}
+.compact-mode .tool-card {
+  border-bottom-color: var(--color-gray-800);
+}
+.compact-mode .tool-card:hover {
+  background-color: var(--color-gray-800);
+  border-color: var(--color-gray-800);
+}
+.pill {
+  background-color: var(--color-gray-700);
+  color: var(--color-gray-300);
+}
+.cta-button,
+.btn-gradient {
+  background-color: var(--color-indigo-600);
+  background-image: none;
+  color: #fff;
+}
+.cta-button:hover,
+.btn-gradient:hover {
+  background-color: var(--color-indigo-700);
+  box-shadow: none;
+}
+.btn-gradient:focus {
+  box-shadow: inset 0 0 0 3px var(--color-indigo-300);
+}
+.solid-spinner {
+  border-color: var(--color-gray-700);
+  border-bottom-color: var(--color-indigo-400);
+}
+.sortable-ghost {
+  border-color: var(--color-indigo-400);
+}
+.saved-signature.selected {
+  border-color: var(--color-indigo-400);
+  box-shadow: inset 0 0 0 2px var(--color-indigo-400);
+}
+.shortcut-key {
+  color: var(--color-gray-200);
+  background-color: var(--color-gray-700);
+  border-color: var(--color-gray-600);
+  box-shadow: 0 1px 0 0 var(--color-gray-800);
+}
+.shortcut-input:focus {
+  border-color: var(--color-indigo-400);
+  box-shadow: inset 0 0 0 2px var(--color-indigo-400);
+}
+::-webkit-scrollbar-track,
+#shortcuts-list::-webkit-scrollbar-track {
+  background: var(--color-gray-800);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-indigo-600);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-indigo-700);
+}
+#shortcuts-list::-webkit-scrollbar-thumb {
+  background: var(--color-gray-600);
+}
+
+/* 觸控裝置沒有鍵盤快捷鍵，首頁搜尋框右邊的「Ctrl + K」在手機上會蓋住提示文字 */
+@media (pointer: coarse) {
+  #shortcut {
+    display: none;
+  }
+}
+
+/* 鍵盤焦點：規範是往內 3px 的主色框 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 3px var(--color-indigo-400);
+}
+
+/* brand.js 加的元素 */
+.cmurx-brand {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.cmurx-brand-sub {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  color: var(--color-gray-400);
+}
+.cmurx-guide {
+  margin: 0 auto 24px;
+  max-width: 48rem;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--color-gray-700);
+  border-radius: 14px;
+  background: var(--color-gray-800);
+  color: var(--color-gray-300);
+  text-align: left;
+}
+.cmurx-guide svg {
+  width: 22px;
+  height: 22px;
+  stroke: var(--color-indigo-400);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  margin-top: 2px;
+}
+.cmurx-guide h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-gray-100);
+}
+.cmurx-guide ul {
+  margin: 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  list-style: disc;
+}
+.cmurx-guide a {
+  color: var(--color-indigo-400);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.cmurx-guide-close {
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--color-gray-400);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.cmurx-guide-close svg {
+  stroke: currentColor;
+  margin: 0;
+}
+.cmurx-guide-close:hover {
+  background: var(--color-gray-700);
+  color: var(--color-gray-100);
+}
+@media (max-width: 640px) {
+  .cmurx-guide {
+    margin-inline: 0;
+  }
+}

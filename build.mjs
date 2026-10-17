@@ -39,7 +39,8 @@ const SOURCE_URL = 'https://github.com/cmurx/pdf-tool-source';
 // 用 API 讀（raw.githubusercontent.com 快取約 5 分鐘，API 約 1 分鐘；未登入每小時 60 次，夠用）
 const SOURCE_API = 'https://api.github.com/repos/cmurx/pdf-tool-source/contents';
 // 公開 repo 放的檔案（export-source 匯出、建置時比對）；Worker 與指南不是 BentoPDF 的衍生作品，不放
-const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json', 'security-headers.json', 'i18n/translate.js', 'i18n/zh-TW.json', 'i18n/scan.mjs'];
+const PUBLIC_FILES = ['build.mjs', 'upstream.json', 'assets-lock.json', 'r2-files.json', 'security-headers.json', 'i18n/translate.js', 'i18n/zh-TW.json', 'i18n/scan.mjs',
+  'brand/theme.css', 'brand/brand.js', 'brand/icon-192.png', 'brand/icon-512.png', 'brand/apple-touch-icon.png', 'brand/favicon.ico'];
 // 上游寫死的英文介面 → 繁中的對照表（指南第 7 節「繁中介面」）
 const I18N_DIR = join(HERE, 'i18n');
 
@@ -50,7 +51,9 @@ const BUILD_ENV = {
   SITE_URL: 'https://pdf.cmu.tw',   // 各頁的 canonical、多語系連結；上游預設指向 bentopdf.com
   VITE_DEFAULT_LANGUAGE: 'zh-TW',   // 預設繁體中文，介面可切換英文等語言
   VITE_BRAND_NAME: 'PDF 工具箱',     // 2026-10-16 系統負責人決定
-  VITE_FOOTER_TEXT: `以 BentoPDF（AGPL-3.0）建置，修改的原始碼：${SOURCE_URL}`,
+  // CMURx 圖示（brand/，addBranding() 放進建置輸出）；頁尾寫明學系製作（2026-10-17 系統負責人決定，指南第 8 節）
+  VITE_BRAND_LOGO: 'images/cmurx-logo.png',
+  VITE_FOOTER_TEXT: `中國醫藥大學藥學系製作，提供全校師生使用。以 BentoPDF（AGPL-3.0）建置，修改的原始碼：${SOURCE_URL}`,
   // patches/0001：讓 Office 轉 PDF 的 LibreOffice 載入中文字型（跟 OCR 共用同一個字型檔）
   VITE_LIBREOFFICE_FONT_URLS: '/wasm/ocr/fonts/NotoSansCJKtc-Regular.otf',
   VITE_WASM_PYMUPDF_URL: '/wasm/pymupdf/',
@@ -130,6 +133,7 @@ async function build() {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   renameSync(join(SRC, 'dist'), ASSETS_DIR);
+  addBranding();
   const i18nMissing = await addUiTranslation();
   await addExternalAssets(pkg);
   const removed = removePrecompressed(ASSETS_DIR);
@@ -206,6 +210,7 @@ function publicReadme() {
 2. 把上游 \`public/libreoffice-wasm/browser.worker.global.js\` 換成 \`node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js\`（上游內附的舊版不支援注入字型）。
 3. [\`build.mjs\`](build.mjs) 開頭 \`BUILD_ENV\` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [\`security-headers.json\`](security-headers.json) 產生的安全標頭。
 4. [\`i18n/\`](i18n/)：上游寫死、沒走翻譯系統的英文介面換成繁體中文。\`build.mjs\` 把對照表 \`zh-TW.json\` 嵌進 \`translate.js\`，放在繁體中文與不帶語言的頁面 \`<head>\` 的第一個 script；介面語言是繁體中文時，畫面文字整段等於對照表的英文才換。\`scan.mjs\` 找出還沒翻的英文。
+5. [\`brand/\`](brand/)：CMURx 的圖示、把配色換成 CMURx 共用前端規範深色主題的 \`theme.css\`、導覽列小字與首頁引導的 \`brand.js\`，\`build.mjs\` 的 \`addBranding()\` 放進每個頁面。CMURx 的圖示是中國醫藥大學藥學系的標誌，不在 AGPL-3.0 授權範圍內。
 
 ## 重現
 
@@ -293,6 +298,49 @@ function syncLibreOfficeWorker() {
   cpSync(installed, vendored);
   const ver = readJson(join(SRC, 'node_modules', '@matbee', 'libreoffice-converter', 'package.json')).version;
   log(`LibreOffice worker 換成 @matbee/libreoffice-converter ${ver} 的版本（支援字型注入）`);
+}
+
+// CMURx 品牌（指南第 8 節）：圖示換成 CMURx 的、配色換成共用前端規範的深色（brand/theme.css）、導覽列小字與首頁引導（brand/brand.js）。
+// 跟繁中對照表一樣疊在上游頁面上、不改上游程式；CSS 與 JS 的檔名帶內容雜湊（Service Worker 會快取 .css／.js）。
+// 放進所有最上層的頁面（各語言都要換色），PDF.js 檢視器等子資料夾不放
+function addBranding() {
+  const brand = join(HERE, 'brand');
+  const icons = {
+    'images/cmurx-logo.png': 'icon-192.png',
+    'images/favicon-192x192.png': 'icon-192.png',
+    'images/favicon-512x512.png': 'icon-512.png',
+    'images/apple-touch-icon.png': 'apple-touch-icon.png',
+    'favicon.ico': 'favicon.ico',
+  };
+  for (const [to, from] of Object.entries(icons)) cpSync(join(brand, from), join(ASSETS_DIR, ...to.split('/')));
+  const hashed = (file, ext) => {
+    const body = readFileSync(join(brand, file));
+    const name = `cmurx-${file.replace(/\.\w+$/, '')}-${createHash('sha256').update(body).digest('hex').slice(0, 8)}.${ext}`;
+    writeFileSync(join(ASSETS_DIR, 'assets', name), body);
+    return `/assets/${name}`;
+  };
+  const css = hashed('theme.css', 'css');
+  const js = hashed('brand.js', 'js');
+  const tags = `<link rel="stylesheet" href="${css}"><script defer src="${js}"></script>`;
+  let pages = 0;
+  for (const f of listFiles(ASSETS_DIR)) {
+    if (!/^(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[^/]+\.html$/.test(f.rel)) continue;
+    let html = readFileSync(f.path, 'utf8');
+    if (!/<\/head>/i.test(html)) { console.warn(`[pdf-tool] 提醒：${f.rel} 沒有 </head>，沒放 CMURx 品牌`); continue; }
+    // 上游的 SVG 網頁圖示（瀏覽器會優先用 SVG）拿掉，改用上面換過的 PNG 與 favicon.ico
+    html = html.replace(/<link rel="icon" type="image\/svg\+xml" href="[^"]*">\s*/g, '');
+    html = html.replace(/<\/head>/i, () => `${tags}</head>`);
+    writeFileSync(f.path, html);
+    pages++;
+  }
+  // 加到主畫面（PWA）時的名稱與顏色
+  const manifest = join(ASSETS_DIR, 'site.webmanifest');
+  if (existsSync(manifest)) {
+    const m = JSON.parse(readFileSync(manifest, 'utf8'));
+    Object.assign(m, { name: 'PDF 工具箱｜CMURx', short_name: 'PDF 工具箱', description: '中國醫藥大學藥學系製作的 PDF 工具，檔案只在瀏覽器裡處理', background_color: '#211a13', theme_color: '#211a13', lang: 'zh-Hant' });
+    writeFileSync(manifest, JSON.stringify(m, null, 2) + '\n');
+  }
+  log(`CMURx 品牌：放進 ${pages} 個頁面（${css}、${js}）`);
 }
 
 // 上游寫死、沒走翻譯系統的英文介面換成繁中（指南第 7 節）：對照表嵌進 i18n/translate.js，放進繁中與不帶語言的頁面 <head> 的第一個 script。
