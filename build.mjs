@@ -457,7 +457,7 @@ function moveLargeFilesToR2() {
   const large = listFiles(ASSETS_DIR).filter((f) => f.size > MAX_ASSET_BYTES).map((f) => f.rel).sort();
   const expected = [...r2List].sort();
   if (JSON.stringify(large) !== JSON.stringify(expected)) {
-    fail(`超過 25 MiB 的檔案跟 r2-files.json 不一致。\n實際：${JSON.stringify(large)}\n清單：${JSON.stringify(expected)}\n上游新增或改了大檔：確認後更新 r2-files.json 與 worker/wrangler.jsonc 的 run_worker_first`);
+    fail(`超過 25 MiB 的檔案跟 r2-files.json 不一致。\n實際：${JSON.stringify(large)}\n清單：${JSON.stringify(expected)}\n上游新增或改了大檔：確認後更新 r2-files.json（Worker 照它決定哪些路徑從 R2 讀）`);
   }
   for (const rel of large) {
     const to = join(R2_DIR, upstream.tag, ...rel.split('/'));
@@ -476,7 +476,8 @@ function writeHeadersFile() {
   writeFileSync(join(ASSETS_DIR, '_headers'), lines.join('\n') + '\n');
 }
 
-// wrangler.jsonc 的 bucket 名稱與 run_worker_first 要跟 r2-files.json 一致：不一致時大檔會 404，或全部請求都經過 Worker。
+// wrangler.jsonc 的 bucket 名稱要跟 r2-files.json 一致（不一致時大檔會 404）；run_worker_first 必須是 true：
+// 網站限學校帳號登入（指南第 1.2 節 B），只列部分路徑的話，其他靜態檔會繞過登入直接送出。
 // 公開 repo 沒有 worker/（不是 BentoPDF 的衍生作品），重現建置時略過
 function checkWranglerConfig() {
   if (!existsSync(WRANGLER_CONF)) {
@@ -493,10 +494,7 @@ function checkWranglerConfig() {
   const buckets = (conf.r2_buckets || []).filter((b) => b.binding === 'LARGE_ASSETS');
   if (buckets.length !== 1 || buckets[0].bucket_name !== R2_BUCKET) problems.push(`LARGE_ASSETS 的 bucket_name 要是 ${R2_BUCKET}`);
   const first = conf.assets?.run_worker_first;
-  const expected = r2List.map((rel) => `/${rel}`).sort();
-  if (!Array.isArray(first) || JSON.stringify([...first].sort()) !== JSON.stringify(expected)) {
-    problems.push(`assets.run_worker_first 要剛好是 ${JSON.stringify(expected)}（現在是 ${JSON.stringify(first)}）`);
-  }
+  if (first !== true) problems.push(`assets.run_worker_first 要是 true，所有請求才會先檢查登入（現在是 ${JSON.stringify(first)}）`);
   if (problems.length) fail(`worker/wrangler.jsonc 跟 r2-files.json 不一致：${problems.join('；')}`);
 }
 
@@ -537,8 +535,14 @@ function dev() {
     run('npx', ['wrangler', 'r2', 'object', 'put', `${R2_BUCKET}/${upstream.tag}/${rel}`, '--file', join(R2_DIR, upstream.tag, ...rel.split('/')),
       '--content-type', 'application/octet-stream', '--local'], { cwd: worker });
   }
+  // 使用紀錄的本機資料庫（資料標準 5.25）；登入要的密鑰放 worker/.dev.vars（不進 git，指南第 9.1 節）
+  run('npx', ['wrangler', 'd1', 'migrations', 'apply', 'cmu-pdf-tool-db', '--local'], { cwd: worker });
+  if (!existsSync(join(worker, '.dev.vars'))) {
+    console.warn('[pdf-tool] 提醒：沒有 worker/.dev.vars（SESSION_SECRET、GOOGLE_CLIENT_SECRET），每個頁面都會顯示「登入設定還沒完成」');
+  }
   log(`本機：http://127.0.0.1:${DEV_PORT}/（埠被佔用時 wrangler 照樣會印 Ready，先確認頁面標題）`);
-  run('npx', ['wrangler', 'dev', '--assets', ASSETS_DIR, '--ip', '127.0.0.1', '--port', String(DEV_PORT)], { cwd: worker });
+  // --test-scheduled：本機可用 /__scheduled 手動觸發每天的排程（只有 wrangler dev 有）
+  run('npx', ['wrangler', 'dev', '--assets', ASSETS_DIR, '--ip', '127.0.0.1', '--port', String(DEV_PORT), '--test-scheduled'], { cwd: worker });
 }
 
 function printPaths() {
