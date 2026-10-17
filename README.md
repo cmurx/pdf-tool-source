@@ -9,7 +9,7 @@
 1. [`patches/`](patches/) 的補丁（說明見 [patches/README.md](patches/README.md)）。
 2. 把上游 `public/libreoffice-wasm/browser.worker.global.js` 換成 `node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js`（上游內附的舊版不支援注入字型）。
 3. [`build.mjs`](build.mjs) 開頭 `BUILD_ENV` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [`security-headers.json`](security-headers.json) 產生的安全標頭。
-4. [`i18n/`](i18n/)：上游寫死、沒走翻譯系統的英文介面換成繁體中文。`build.mjs` 把對照表 `zh-TW.json` 嵌進 `translate.js`，放在每個頁面 `<head>` 的第一個 script；介面語言是繁體中文時，畫面文字整段等於對照表的英文才換。`scan.mjs` 找出還沒翻的英文。
+4. [`i18n/`](i18n/)：上游寫死、沒走翻譯系統的英文介面換成繁體中文。`build.mjs` 把對照表 `zh-TW.json` 嵌進 `translate.js`，放在繁體中文與不帶語言的頁面 `<head>` 的第一個 script；介面語言是繁體中文時，畫面文字整段等於對照表的英文才換。`scan.mjs` 找出還沒翻的英文。
 
 ## 重現
 
