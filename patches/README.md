@@ -12,7 +12,7 @@
 - **補丁**：`src/js/utils/libreoffice-loader.ts` 讀新的建置設定 `VITE_LIBREOFFICE_FONT_URLS`（逗號分隔的字型網址），載入後用 `@matbee/libreoffice-converter` 的 `fonts` 選項注入 LibreOffice；`src/types/globals.d.ts`、`.env.example` 跟著加。
 - **另外一步（不在補丁裡）**：上游 `public/libreoffice-wasm/browser.worker.global.js` 是不支援 `fonts` 的舊版，`build.mjs` 的 `syncLibreOfficeWorker()` 換成 `node_modules/@matbee/libreoffice-converter`（2.6.0）的版本。這個檔是壓縮過的第三方程式，不適合做成文字補丁。
 - **驗證**（2026-10-16）：指定思源黑體、新細明體、標楷體、微軟正黑體的 Word 檔，以及沒指定字型的 Word 檔，轉出來的中文都正常（沒有的字型會改用思源黑體）。
-- **上游狀態**：還沒送（2026-10-16 查 issues 沒有人回報過）。系統負責人決定用個人 GitHub 帳號 fork 上游、送 PR。上游要求第一次送 PR 時簽貢獻者授權書（ICLA，CLA 機器人會在 PR 留言），內容包含允許上游把貢獻用在商業授權版本；代表雇主貢獻的要改簽 CCLA。PR 要以上游的 `main` 為基礎，送之前確認補丁還套得上。2026-10-17：分支 `fix/libreoffice-cjk-fonts` 已推到 fork `oa-cmu/bentopdf`（以上游 `main` `b5a69f9` 為基礎，含補丁、換新版 worker、Dockerfile 與 `docs/self-hosting/docker.md`），PR 由系統負責人開。
+- **上游狀態**：還沒送（2026-10-16 查 issues 沒有人回報過）。系統負責人決定用個人 GitHub 帳號 fork 上游、送 PR。上游要求第一次送 PR 時簽貢獻者授權書（ICLA，CLA 機器人會在 PR 留言），內容包含允許上游把貢獻用在商業授權版本；代表雇主貢獻的要改簽 CCLA。PR 要以上游的 `main` 為基礎，送之前確認補丁還套得上。2026-10-17：已送 [PR #921](https://github.com/alam00000/bentopdf/pull/921)（fork `oa-cmu/bentopdf` 的 `fix/libreoffice-cjk-fonts`，以上游 `main` `b5a69f9` 為基礎，含補丁、換新版 worker、Dockerfile、`docs/self-hosting/docker.md`、CSP 產生腳本 `scripts/generate-security-headers.mjs`）。這裡的補丁只取其中 `src/` 與 `.env.example` 的部分，跟 PR 同步。
 
 ### 送上游的說明（草稿）
 

@@ -16,10 +16,10 @@ index 18835b9..c59c4cd 100644
  # Supported: en, ar, be, fr, de, es, zh, zh-TW, vi, tr, id, it, pt, nl, da, ko, sv, ru
  VITE_DEFAULT_LANGUAGE=
 diff --git a/src/js/utils/libreoffice-loader.ts b/src/js/utils/libreoffice-loader.ts
-index 8321f63..9b892cd 100644
+index 8321f63..b3c6e1c 100644
 --- a/src/js/utils/libreoffice-loader.ts
 +++ b/src/js/utils/libreoffice-loader.ts
-@@ -10,6 +10,38 @@ import type { InputFormat } from '@matbee/libreoffice-converter/browser';
+@@ -10,6 +10,43 @@ import type { InputFormat } from '@matbee/libreoffice-converter/browser';
  
  const LIBREOFFICE_LOCAL_PATH = import.meta.env.BASE_URL + 'libreoffice-wasm/';
  
@@ -34,6 +34,11 @@ index 8321f63..9b892cd 100644
 +  .map((url) => url.trim())
 +  .filter(Boolean);
 +
++/**
++ * Fetch the fonts listed in VITE_LIBREOFFICE_FONT_URLS for injection into
++ * LibreOffice. Fonts that fail to load are skipped with a warning so the
++ * converter still starts with its bundled fonts.
++ */
 +async function fetchExtraFonts(): Promise<
 +  { filename: string; data: ArrayBuffer }[]
 +> {
@@ -58,7 +63,7 @@ index 8321f63..9b892cd 100644
  export interface LoadProgress {
    phase: 'loading' | 'initializing' | 'converting' | 'complete' | 'ready';
    percent: number;
-@@ -75,7 +107,7 @@ export class LibreOfficeConverter {
+@@ -75,7 +112,7 @@ export class LibreOfficeConverter {
          message: 'Loading conversion engine...',
        });
  
@@ -67,7 +72,7 @@ index 8321f63..9b892cd 100644
          fetchAsDecompressedUrl(
            `${this.basePath}soffice.wasm.gz`,
            'application/wasm'
-@@ -84,9 +116,11 @@ export class LibreOfficeConverter {
+@@ -84,9 +121,11 @@ export class LibreOfficeConverter {
            `${this.basePath}soffice.data.gz`,
            'application/octet-stream'
          ),
