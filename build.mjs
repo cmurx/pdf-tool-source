@@ -8,11 +8,13 @@
 //   node build.mjs paths          印出工作資料夾與部署、上傳 R2 要用的指令
 //   node build.mjs export-source <資料夾>  把要公開的修改原始碼（補丁、建置腳本、設定檔、授權）匯出到公開 repo 的本機資料夾
 //   node build.mjs latest-upstream  印出上游最新的正式版本與 commit（每週檢查流程用）
+//   node build.mjs check-upstream <tag> <commit>  不執行上游程式、只用 git 與讀檔檢查新版本（每週檢查流程用，輸出 Markdown）
 //
 // 部署與上傳 R2 刻意不寫進這支腳本：那兩個指令要直接打，Claude Code 的 permissions.ask 才攔得到。
 //
-// 建置會執行上游的程式碼（vite 設定、建置腳本）。為了縮小影響範圍：套件安裝不執行安裝腳本（--ignore-scripts），
-// 子程式只拿到建置需要的環境變數（childEnv），換上游版本前先看過版本說明與程式差異（指南第 9.2 節）。
+// 建置會執行上游的程式碼（vite 設定、建置腳本），所以只在本機、看過版本說明與程式差異後才建置（指南第 9.2 節）；
+// GitHub Actions 只跑 check-upstream。為了縮小影響範圍：套件安裝不執行安裝腳本（--ignore-scripts），
+// 子程式只拿到建置需要的環境變數（childEnv）。
 //
 // 工作資料夾：環境變數 PDF_TOOL_WORK；沒設時 Windows 用 %LOCALAPPDATA%\pdf-tool-build，其他用 ~/.cache/pdf-tool-build。
 import { spawnSync } from 'node:child_process';
@@ -62,8 +64,10 @@ const BUILD_ENV = {
   // 數位簽章的憑證鏈代理：不架（2026-10-16 系統負責人決定，指南第 7 節）
   VITE_CORS_PROXY_URL: '',
 };
-// 子程式（git、npm、上游的建置程式）能拿到的環境變數；其他的（例如權杖）一律不傳
-const CHILD_ENV_KEYS = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|USERNAME|USER|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|OS|LANG|LC_ALL|TERM|CI|NODE_EXTRA_CA_CERTS|HTTPS?_PROXY|NO_PROXY|NPM_CONFIG_[A-Z_]+)$/i;
+// 子程式（git、npm、上游的建置程式）能拿到的環境變數；其他的（例如權杖）一律不傳。
+// npm 的設定只放行快取、registry、代理這幾個，登入用的（_auth、_authToken 等）不傳
+const CHILD_ENV_KEYS = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|USERNAME|USER|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|OS|LANG|LC_ALL|TERM|CI|NODE_EXTRA_CA_CERTS|HTTPS?_PROXY|NO_PROXY|NPM_CONFIG_(CACHE|REGISTRY|PROXY|HTTPS_PROXY|NOPROXY|STRICT_SSL|CAFILE|FETCH_RETRIES|FETCH_TIMEOUT))$/i;
+const SECRET_LIKE = /AUTH|TOKEN|PASSWORD|SECRET|_KEY/i;
 const OCR_LANGS = ['chi_tra', 'eng'];
 const OCR_FONTS = ['Noto Sans TC', 'Noto Sans'];
 const MAX_ASSET_BYTES = 25 * 1024 * 1024;
@@ -92,6 +96,7 @@ else if (cmd === 'dev') dev();
 else if (cmd === 'paths') printPaths();
 else if (cmd === 'export-source') exportSource(process.argv[3]);
 else if (cmd === 'latest-upstream') latestUpstream();
+else if (cmd === 'check-upstream') checkUpstream(process.argv[3], process.argv[4]);
 else fail(`不認得的指令：${cmd}`);
 
 // ---------------------------------------------------------------------------
@@ -195,7 +200,7 @@ function publicReadme() {
 node build.mjs
 \`\`\`
 
-\`build.mjs\` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [\`assets-lock.json\`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 \`out/assets\`（超過 25 MiB 的檔在 \`out/r2\`）。\`build.mjs\` 會核對 \`worker/wrangler.jsonc\`，\`dev\`、\`paths\` 指令也會用到 \`worker/\`；那是網站的部署設定，不在這個 repo，重現建置時可以把 \`checkWranglerConfig()\` 那一行拿掉。
+\`build.mjs\` 會抓上游指定的版本、核對 commit 雜湊、套補丁、建置，並下載 WASM 與字型（npm 以外的下載核對 [\`assets-lock.json\`](assets-lock.json) 的 SHA-256）。輸出在工作資料夾的 \`out/assets\`（超過 25 MiB 的檔在 \`out/r2\`）。\`worker/\` 是網站的部署設定（不是 BentoPDF 的衍生作品），不在這個 repo：沒有它時 \`build.mjs\` 會略過部署設定的核對，建置照常；\`dev\` 指令需要它。
 
 ## 授權
 
@@ -219,9 +224,9 @@ function prepareSource() {
     && git(['rev-parse', 'HEAD'], SRC) === upstream.commit
     && git(['config', '--get', 'core.autocrlf'], SRC) === 'false';
   if (!ok) {
-    // 換了上游版本：舊版的原始碼與套件（數百 MB）一起清掉
+    // 換了上游版本：舊版的原始碼與套件（數百 MB）一起清掉；只刪 build.mjs 自己建的 src-<12 位 commit>
     if (existsSync(WORK)) {
-      for (const d of readdirSync(WORK)) if (d.startsWith('src-')) rmSync(join(WORK, d), { recursive: true, force: true });
+      for (const d of readdirSync(WORK)) if (/^src-[0-9a-f]{12}$/.test(d)) rmSync(join(WORK, d), { recursive: true, force: true });
     }
     log(`抓上游 ${upstream.tag} 到 ${SRC}`);
     run('git', ['-c', 'advice.detachedHead=false', 'clone', '--config', 'core.autocrlf=false', '--depth', '1', '--branch', upstream.tag, '--quiet', upstream.repo, SRC]);
@@ -250,7 +255,7 @@ function prepareSource() {
 function applyPatches() {
   for (const p of listPatches()) {
     const file = join(PATCH_DIR, p);
-    const check = spawnSync('git', ['apply', '--check', file], { cwd: SRC, encoding: 'utf8' });
+    const check = spawnSync('git', ['apply', '--check', file], { cwd: SRC, encoding: 'utf8', env: childEnv() });
     if (check.status !== 0) {
       fail(`補丁 ${p} 套不上 ${upstream.tag}：上游可能已經修好（確認後刪掉補丁）或改了寫法（重做補丁）。\n${check.stderr}`);
     }
@@ -281,20 +286,7 @@ async function addExternalAssets(pkg) {
   const seen = {};
   const tmp = mkdtempSync(join(tmpdir(), 'pdf-tool-assets-'));
   const w = join(ASSETS_DIR, 'wasm');
-  const lockFile = readJson(join(SRC, 'package-lock.json'));
-  const cdnVersion = readFileSync(join(SRC, 'src/js/const/cdn-version.ts'), 'utf8');
-  const wasmProvider = readFileSync(join(SRC, 'src/js/utils/wasm-provider.ts'), 'utf8');
-  const fontMappings = readFileSync(join(SRC, 'src/js/config/font-mappings.ts'), 'utf8');
-  const editorFonts = readFileSync(join(SRC, 'src/js/config/editor-fonts.ts'), 'utf8');
-
-  const versions = {
-    pymupdf: match(cdnVersion, /pymupdf: '([^']+)'/, 'PyMuPDF 版本'),
-    ghostscript: match(cdnVersion, /ghostscript: '([^']+)'/, 'Ghostscript 版本'),
-    cpdf: match(wasmProvider, /coherentpdf@([\d.]+)/, 'CoherentPDF 版本'),
-    tesseract: lockFile.packages['node_modules/tesseract.js']?.version,
-    tesseractCore: lockFile.packages['node_modules/tesseract.js-core']?.version,
-  };
-  if (!versions.tesseract || !versions.tesseractCore) fail('package-lock.json 找不到 tesseract.js 的版本');
+  const { versions, ocrFontUrls, editorFontPacks } = readUpstreamConfig(SRC);
 
   // npm 套件：npm pack 會核對 registry 的完整性雜湊，不執行套件的腳本
   const pack = (spec) => {
@@ -303,7 +295,7 @@ async function addExternalAssets(pkg) {
     const file = r.stdout.trim().split(/\r?\n/).pop();
     const out = join(tmp, file.replace(/\.tgz$/, ''));
     mkdirSync(out, { recursive: true });
-    const x = spawnSync('tar', ['-xzf', file, '-C', out], { cwd: tmp, encoding: 'utf8' });
+    const x = spawnSync('tar', ['-xzf', file, '-C', out], { cwd: tmp, encoding: 'utf8', env: childEnv() });
     if (x.status !== 0) fail(`解壓 ${file} 失敗：${x.stderr}`);
     log(`  ${spec}`);
     return join(out, 'package');
@@ -331,18 +323,15 @@ async function addExternalAssets(pkg) {
   cpSync(existsSync(join(cpdf, 'dist')) ? join(cpdf, 'dist') : cpdf, join(w, 'cpdf'), { recursive: true });
   cpSync(join(pack(`tesseract.js@${versions.tesseract}`), 'dist', 'worker.min.js'), join(w, 'ocr', 'worker.min.js'));
   cpSync(pack(`tesseract.js-core@${versions.tesseractCore}`), join(w, 'ocr', 'core'), { recursive: true });
-  for (const m of editorFonts.matchAll(/'(fonts-[a-z]+)@([\d.]+)\/fonts\/([^']+)'/g)) {
-    const p = pack(`@embedpdf/${m[1]}@${m[2]}`);
-    cpSync(join(p, 'fonts', m[3]), join(w, 'editor-fonts', `${m[1]}@${m[2]}`, 'fonts', m[3]));
+  for (const f of editorFontPacks) {
+    const p = pack(`@embedpdf/${f.name}@${f.version}`);
+    cpSync(join(p, 'fonts', f.file), join(w, 'editor-fonts', `${f.name}@${f.version}`, 'fonts', f.file));
   }
   for (const lang of OCR_LANGS) {
     await download(`https://cdn.jsdelivr.net/npm/@tesseract.js-data/${lang}/4.0.0_best_int/${lang}.traineddata.gz`,
       join(w, 'ocr', 'lang-data', `${lang}.traineddata.gz`));
   }
-  for (const family of OCR_FONTS) {
-    const url = match(fontMappings, new RegExp(`'${family}':\\s*'([^']+)'`), `${family} 字型網址`);
-    await download(url, join(w, 'ocr', 'fonts', url.split('/').pop()));
-  }
+  for (const url of ocrFontUrls) await download(url, join(w, 'ocr', 'fonts', url.split('/').pop()));
   rmSync(tmp, { recursive: true, force: true });
 
   if (updateLock) {
@@ -352,6 +341,39 @@ async function addExternalAssets(pkg) {
     }, null, 2) + '\n');
     log(`已更新 ${relative(HERE, LOCK_PATH)}`);
   }
+}
+
+// build.mjs 從上游原始碼讀的設定（只讀檔、不執行）。建置時找不到就停；check-upstream 傳 report 收集問題
+function readUpstreamConfig(dir, report = fail) {
+  const read = (rel) => {
+    if (existsSync(join(dir, rel))) return readFileSync(join(dir, rel), 'utf8');
+    report(`上游找不到 ${rel}`);
+    return '';
+  };
+  const find = (text, re, what) => {
+    const m = text.match(re);
+    if (!m) report(`上游原始碼找不到${what}（上游可能改了寫法，要更新 build.mjs）`);
+    return m ? m[1] : null;
+  };
+  let lock = { packages: {} };
+  try { lock = JSON.parse(read('package-lock.json') || '{"packages":{}}'); } catch { report('上游的 package-lock.json 讀不了'); }
+  const cdnVersion = read('src/js/const/cdn-version.ts');
+  const wasmProvider = read('src/js/utils/wasm-provider.ts');
+  const fontMappings = read('src/js/config/font-mappings.ts');
+  const editorFonts = read('src/js/config/editor-fonts.ts');
+  const lockVersion = (name) => lock.packages?.[`node_modules/${name}`]?.version ?? (report(`package-lock.json 找不到 ${name} 的版本`), null);
+  const versions = {
+    pymupdf: find(cdnVersion, /pymupdf: '([^']+)'/, ' PyMuPDF 版本'),
+    ghostscript: find(cdnVersion, /ghostscript: '([^']+)'/, ' Ghostscript 版本'),
+    cpdf: find(wasmProvider, /coherentpdf@([\d.]+)/, ' CoherentPDF 版本'),
+    tesseract: lockVersion('tesseract.js'),
+    tesseractCore: lockVersion('tesseract.js-core'),
+  };
+  const ocrFontUrls = OCR_FONTS.map((family) => find(fontMappings, new RegExp(`'${family}':\\s*'([^']+)'`), ` ${family} 字型網址`)).filter(Boolean);
+  const editorFontPacks = [...editorFonts.matchAll(/'(fonts-[a-z]+)@([\d.]+)\/fonts\/([^']+)'/g)]
+    .map((m) => ({ name: m[1], version: m[2], file: m[3] }));
+  if (!editorFontPacks.length) report('上游原始碼找不到編輯器的備用字型清單（editor-fonts.ts）');
+  return { versions, ocrFontUrls, editorFontPacks };
 }
 
 // vite 預先壓好的 .br／.gz 副本；Cloudflare 會自己壓縮。原檔存在才刪（LibreOffice 的 .gz 本身就是原檔）
@@ -386,14 +408,98 @@ function writeHeadersFile() {
   writeFileSync(join(ASSETS_DIR, '_headers'), lines.join('\n') + '\n');
 }
 
-// wrangler.jsonc 的 bucket 名稱與 run_worker_first 要跟 r2-files.json 一致：不一致時大檔會 404，或全部請求都經過 Worker
+// wrangler.jsonc 的 bucket 名稱與 run_worker_first 要跟 r2-files.json 一致：不一致時大檔會 404，或全部請求都經過 Worker。
+// 公開 repo 沒有 worker/（不是 BentoPDF 的衍生作品），重現建置時略過
 function checkWranglerConfig() {
-  const conf = readFileSync(WRANGLER_CONF, 'utf8');
+  if (!existsSync(WRANGLER_CONF)) {
+    log('沒有 worker/wrangler.jsonc，略過部署設定的核對（重現建置不需要）');
+    return;
+  }
+  let conf;
+  try {
+    conf = JSON.parse(stripJsonComments(readFileSync(WRANGLER_CONF, 'utf8')));
+  } catch (e) {
+    fail(`worker/wrangler.jsonc 解析失敗：${e.message}`);
+  }
   const problems = [];
-  if (!conf.includes(`"bucket_name": "${R2_BUCKET}"`)) problems.push(`bucket_name 不是 ${R2_BUCKET}`);
-  for (const rel of r2List) if (!conf.includes(`"/${rel}"`)) problems.push(`run_worker_first 少了 /${rel}`);
-  if (/"run_worker_first"\s*:\s*true/.test(conf)) problems.push('run_worker_first 不要設成 true（安全標頭改由 _headers 加）');
+  const buckets = (conf.r2_buckets || []).filter((b) => b.binding === 'LARGE_ASSETS');
+  if (buckets.length !== 1 || buckets[0].bucket_name !== R2_BUCKET) problems.push(`LARGE_ASSETS 的 bucket_name 要是 ${R2_BUCKET}`);
+  const first = conf.assets?.run_worker_first;
+  const expected = r2List.map((rel) => `/${rel}`).sort();
+  if (!Array.isArray(first) || JSON.stringify([...first].sort()) !== JSON.stringify(expected)) {
+    problems.push(`assets.run_worker_first 要剛好是 ${JSON.stringify(expected)}（現在是 ${JSON.stringify(first)}）`);
+  }
   if (problems.length) fail(`worker/wrangler.jsonc 跟 r2-files.json 不一致：${problems.join('；')}`);
+}
+
+// 拿掉 JSONC 的 // 與 /* */ 註解（字串裡的不動）
+function stripJsonComments(text) {
+  let out = '';
+  for (let i = 0, inStr = false; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      out += c;
+      if (c === '\\') out += text[++i] ?? '';
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true; out += c;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      i = text.indexOf('*/', i + 2);
+      if (i < 0) break;
+      i++;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+// 每週檢查流程用：只用 git 下載與讀檔檢查上游的新版本，不安裝套件、不執行上游的任何程式。
+// 輸出 Markdown（放進 issue），上游來的字串先拿掉反引號與角括號，避免在 issue 裡變成連結或跳出程式碼框
+function checkUpstream(tag, commit) {
+  if (!/^v\d+\.\d+\.\d+$/.test(tag || '') || !/^[0-9a-f]{40}$/.test(commit || '')) fail('用法：node build.mjs check-upstream <vX.Y.Z> <40 位 commit>');
+  const clean = (s) => String(s).replace(/[`<>]/g, '').replace(/\r/g, '').trim();
+  const dir = mkdtempSync(join(tmpdir(), 'pdf-tool-check-'));
+  const rows = [];
+  const add = (ok, item, note = '') => rows.push(`| ${ok ? '✅' : '❌'} | ${item} | ${note} |`);
+  try {
+    const r = spawnSync('git', ['-c', 'advice.detachedHead=false', 'clone', '--config', 'core.autocrlf=false', '--depth', '1', '--branch', tag, '--quiet', upstream.repo, dir],
+      { encoding: 'utf8', env: childEnv() });
+    if (r.status !== 0) {
+      add(false, `抓 ${tag}`, clean(r.stderr).slice(0, 300));
+    } else {
+      const head = git(['rev-parse', 'HEAD'], dir);
+      add(head === commit, '標籤指向的 commit', head === commit ? commit.slice(0, 7) : `標籤指向 ${clean(head)}，ls-remote 是 ${commit}`);
+      for (const p of listPatches()) {
+        const c = spawnSync('git', ['apply', '--check', join(PATCH_DIR, p)], { cwd: dir, encoding: 'utf8', env: childEnv() });
+        add(c.status === 0, `補丁 ${p} 套得上`, c.status === 0 ? '' : clean(c.stderr).split('\n').slice(0, 3).join(' / '));
+      }
+      const vendored = join(dir, 'public', 'libreoffice-wasm', 'browser.worker.global.js');
+      const fixed = existsSync(vendored) && readFileSync(vendored, 'utf8').includes('share/fonts');
+      rows.push(`| ${fixed ? '🎉' : '—'} | 上游內附的 LibreOffice worker 支援字型注入 | ${fixed ? '上游可能已修好中文字型：確認後可以拿掉補丁 0001 與 syncLibreOfficeWorker()' : '還沒，照常換新版 worker'} |`);
+      const problems = [];
+      const cfg = readUpstreamConfig(dir, (msg) => problems.push(msg));
+      add(!problems.length, 'build.mjs 讀得到上游設定（WASM 版本、字型清單）', problems.map(clean).join('；'));
+      if (!problems.length) {
+        const v = cfg.versions;
+        rows.push(`| — | 外部元件版本 | PyMuPDF ${clean(v.pymupdf)}、Ghostscript ${clean(v.ghostscript)}、CoherentPDF ${clean(v.cpdf)}、Tesseract ${clean(v.tesseract)} |`);
+      }
+      const large = existsSync(join(dir, 'public'))
+        ? listFiles(join(dir, 'public')).filter((f) => f.size > MAX_ASSET_BYTES).map((f) => f.rel).sort()
+        : [];
+      const same = JSON.stringify(large) === JSON.stringify([...r2List].sort());
+      add(same, 'public/ 裡超過 25 MiB 的檔跟 r2-files.json 一致', same ? '' : `實際：${large.map(clean).join('、') || '（無）'}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  console.log('| 結果 | 項目 | 說明 |');
+  console.log('|---|---|---|');
+  for (const row of rows) console.log(row);
+  console.log('\n只檢查不需要執行上游程式的項目；完整建置（vite、npm 套件裡的 WASM 大小等）在本機做。');
 }
 
 function dev() {
@@ -446,7 +552,7 @@ function latestUpstream() {
 
 function childEnv(extra = {}) {
   const env = {};
-  for (const [k, v] of Object.entries(process.env)) if (CHILD_ENV_KEYS.test(k)) env[k] = v;
+  for (const [k, v] of Object.entries(process.env)) if (CHILD_ENV_KEYS.test(k) && !SECRET_LIKE.test(k)) env[k] = v;
   return { ...env, ...extra };
 }
 function run(command, args, opts = {}) {
@@ -470,11 +576,6 @@ function listFiles(dir) {
 }
 function readJson(p) {
   return JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
-}
-function match(text, re, what) {
-  const m = text.match(re);
-  if (!m) fail(`上游原始碼找不到${what}（上游可能改了寫法，要更新 build.mjs）`);
-  return m[1];
 }
 function mb(n) { return (n / 1048576).toFixed(1); }
 function log(s) { console.log(`[pdf-tool] ${s}`); }
