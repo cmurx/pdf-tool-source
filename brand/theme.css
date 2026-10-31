@@ -223,6 +223,85 @@ body {
   }
 }
 
+/* 導覽列最左邊：回工作台的 ☰（brand.js 的 deskMenu()，只有工作台使用者） */
+.cmurx-desk {
+  position: relative;
+  margin-right: 8px;
+  flex: none;
+}
+.cmurx-desk svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cmurx-desk-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-gray-200);
+  cursor: pointer;
+}
+.cmurx-desk-btn svg {
+  width: 22px;
+  height: 22px;
+}
+.cmurx-desk-btn:hover,
+.cmurx-desk-btn[aria-expanded="true"] {
+  background: var(--color-gray-700);
+  color: var(--color-gray-50);
+}
+.cmurx-desk-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 220px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--color-gray-600);
+  border-radius: 12px;
+  background: var(--color-gray-800);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.cmurx-desk-menu[hidden] {
+  display: none;
+}
+.cmurx-desk-menu a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--color-gray-200);
+  font-size: 15px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cmurx-desk-menu a:hover {
+  background: var(--color-gray-700);
+  color: var(--color-gray-50);
+}
+.cmurx-desk-ext {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--color-gray-400);
+}
+.cmurx-desk-ext svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* 導覽列右邊：目前登入的帳號＋登出 */
 .cmurx-account {
   margin-left: auto;
@@ -286,5 +365,11 @@ body {
 @media (max-width: 640px) {
   .cmurx-account-text {
     max-width: 30vw;
+  }
+}
+/* 很窄（320 這類）又有工作台的 ☰ 時，帳號只剩一個圖示、看不到字：整個收起來，登出按鈕保留 */
+@media (max-width: 359px) {
+  .cmurx-desk ~ .cmurx-account .cmurx-account-email {
+    display: none;
   }
 }
