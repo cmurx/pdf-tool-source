@@ -1,9 +1,10 @@
 /*
- * PDF工具：把上游 BentoPDF 的配色換成 CMURx 共用前端規範的深色主題（共用前端規範第 1.2 節「深色」欄；指南第 8 節）。
+ * PDF工具：把上游 BentoPDF 的配色換成 CMURx 共用前端規範的主題（共用前端規範第 1.2 節；指南第 8 節）。
  * 上游用 Tailwind 4，顏色都是 CSS 變數（--color-gray-800 等，定義在 @layer theme）；這裡不放進任何 layer，所以會蓋過上游。
  * build.mjs 放在每個頁面 </head> 前面（排在上游樣式後面，壓過上游寫死的 body 背景色）。
- * 上游只有深色版面（大量寫死 text-white、bg-white，PDF 預覽是白頁），規範的紙感淺色不做（2026-10-17 系統負責人選）。
- * 對比：主要組合都 ≥4.5（白字在主色按鈕 5.9、說明文字在卡片 5.4），2026-10-17 計算。
+ * 上游只有深色版面。這個檔先寫深色（裝置沒指定時也是深色），檔尾的 @media (prefers-color-scheme: light) 一段跟著裝置換成規範的紙感淺色
+ * （2026-11-01 系統負責人決定加；做法與風險見 設計方案/工作台整體介面_設計方案.md 第 8.6 節）。深色的規則不要放進那一段。
+ * 對比：深色主要組合都 ≥4.5（白字在主色按鈕 5.9、說明文字在卡片 5.4），2026-10-17 計算；淺色由 test/theme-check.mjs 在建置後逐頁算。
  */
 :root {
   /* 灰階 → 規範深色的暖棕：900 頁面底、800 卡片與導覽列、700 輸入框與次要區塊、600 邊框 */
@@ -371,5 +372,191 @@ body {
 @media (max-width: 359px) {
   .cmurx-desk ~ .cmurx-account .cmurx-account-email {
     display: none;
+  }
+}
+
+/* ===========================================================================
+ * 淺色（裝置設成淺色時；2026-11-01）。色值取自共用前端 tokens.css 的紙感（paper／umber／clay／lake／moss／brick／ochre）。
+ * 做法：上面深色用的同一組 Tailwind 變數，在這裡換成淺色、灰階反向（900 頁面底、800 卡片、700 輸入框、600 邊框；50～500 是字），
+ * bg-gray-*／text-gray-*／border-gray-* 就跟著翻。翻變數救不了的逐條處理：寫死的白字 text-white（實心彩色底上的保留白色）、
+ * 實心黑底、上游自己是淺色的區塊（bg-white）、深色底用的語意淺字（text-red-200 等）、上游 styles.css 寫死的 hex。
+ * 上游換版時新出現的顏色 class 與 hex 由 test/theme-check.mjs 擋下（指南第 9.2 節）。
+ * =========================================================================== */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --color-gray-50: #1f1810;
+    --color-gray-100: #2d251c;
+    --color-gray-200: #3c332a;
+    --color-gray-300: #4a3f33;
+    --color-gray-400: #5f5342;
+    --color-gray-500: #716451;
+    --color-gray-600: #ddd0b3;
+    --color-gray-700: #eee4cf;
+    --color-gray-800: #faf5e8;
+    --color-gray-900: #f2ead9;
+    --color-gray-950: #e9dfc8;
+    /* 赭紅：600 按鈕底（配白字）不變，500／700 是它的 hover，要比 600 深；50～400 當字用，改深 */
+    --color-indigo-50: #3a1f0e;
+    --color-indigo-100: #4a2812;
+    --color-indigo-200: #5f3117;
+    --color-indigo-300: #7a3d1b;
+    --color-indigo-400: #8f4a22;
+    --color-indigo-500: #8a4720;
+    --color-indigo-700: #83421d;
+    --color-indigo-800: #efc6a0;
+    --color-indigo-900: #f5dcc4;
+    --color-indigo-950: #fbf0e4;
+    /* 湖藍（資訊）：300／400 當字用改深，900 的深色提示框改淡底 */
+    --color-blue-300: #2f5f72;
+    --color-blue-400: #356a7e;
+    --color-blue-500: #4a7a8c;
+    --color-blue-900: #e1eaec;
+    /* 語意色：深色底上的淺字（300／400）改成深字，900 的深色提示框改成淡底；
+       500～700 是實心按鈕（配白字），上游預設的紅綠橘黃配白字不到 4.5，換成規範的 brick／moss／ochre */
+    --color-red-300: #8f2f22;
+    --color-red-400: #92301f;
+    --color-red-500: #8f3b30;
+    --color-red-600: #a3453a;
+    --color-red-700: #7a3229;
+    --color-red-900: #f2e0da;
+    --color-green-300: #344d24;
+    --color-green-400: #44632f;
+    --color-green-600: #566f48;
+    --color-green-700: #4a5f3e;
+    --color-green-900: #e6ead9;
+    --color-orange-600: #9a4f12;
+    --color-orange-700: #833f0c;
+    --color-yellow-300: #7a5a16;
+    --color-yellow-400: #7a5a16;
+    --color-yellow-500: #8c6000;
+    --color-yellow-600: #8c6000;
+    --color-yellow-700: #74500a;
+    --color-yellow-900: #f3e7c8;
+    --color-amber-300: #7a5a16;
+    --color-amber-400: #7a5a16;
+    --color-amber-900: #f3e7c8;
+    --color-purple-400: #6b4a8a;
+    --color-orange-400: #8a4a16;
+    --color-violet-300: #5b3f8a;
+    --color-rose-300: #8a2f4a;
+    --color-teal-300: #1f5f5a;
+  }
+
+  /* 上游 styles.css 寫死、深色底才看得到的 hex */
+  .category-header { color: var(--color-gray-100); }
+  #tool-interface { color: var(--color-blue-400); }
+  .legal-content h2, .legal-content h3 { color: var(--color-indigo-400); }
+  .legal-content p, .legal-content ul { color: var(--color-gray-300); }
+  .legal-content a { color: var(--color-indigo-400); }
+  .legal-content a:hover { color: var(--color-indigo-700); }
+  .bg-grid-pattern {
+    background-image:
+      linear-gradient(to right, rgba(60, 51, 42, 0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(60, 51, 42, 0.07) 1px, transparent 1px);
+  }
+  input[type='color'] { border-color: var(--color-gray-600); }
+  .cmurx-desk-menu { box-shadow: 0 8px 24px rgba(60, 51, 42, 0.18); }
+
+  /* 上游自己是淺色的區塊（白底的書籤編輯器、PDF 預覽框；書籤的彈窗 .modal-content 是 bookmark.css 寫死白底）：
+     灰階換回深色主題那組，裡面跟深色版的樣子一樣（只有說明文字較深） */
+  :is([class~="bg-white"], .modal-content) {
+    --color-gray-50: #f5efe3;
+    --color-gray-100: #ece2d0;
+    --color-gray-200: #e2d6c0;
+    --color-gray-300: #d4c6ad;
+    /* 400／500 是說明文字：深色主題那組在白底只有 3 左右（深色版現在也是這樣），這裡改深 */
+    --color-gray-400: #716451;
+    --color-gray-500: #716451;
+    --color-gray-600: #4f412d;
+    --color-gray-700: #3a2f21;
+    --color-gray-800: #2b2318;
+    --color-gray-900: #211a13;
+    --color-gray-950: #1a140e;
+  }
+  :is([class~="bg-white"], .modal-content) :is(input, textarea)::placeholder { color: #716451; }
+
+  /* 灰色按鈕的 hover 底色（bg-gray-600 hover:bg-gray-500）：500 在淺色是字的顏色，當底太深 */
+  .hover\:bg-gray-500:hover { background-color: #d3c5a6; }
+
+  /* ---- 寫死的黑底：彈窗遮罩（fixed）改半透明，其他實心黑底（OCR 紀錄）改卡片色，縮圖上的頁碼標籤（白字）不動 ---- */
+  [class~="bg-black"][class~="fixed"] { background-color: rgba(31, 24, 16, 0.45); }
+  [class~="bg-black"]:not([class~="fixed"]):not(.text-white) { background-color: var(--color-gray-700); }
+}
+
+/* 淺色的字色覆寫，放進 Tailwind 的 utilities 層、排在上游的 class 後面：選擇器跟上游的 class 一樣只有一個 class 的權重，
+   蓋得過 text-white 這類 class，同一個元素上的 hover:／disabled: 等變體（權重較高）照樣生效 */
+@layer utilities {
+  @media (prefers-color-scheme: light) {
+    /* 深色提示框（bg-*-900）上的淺字：100／200 的變數同時是上游淺色區塊的底色，所以改字的 class、不改變數 */
+    .text-red-100, .text-red-200 { color: #7d281c; }
+    .text-green-100, .text-green-200 { color: #2f4a22; }
+    .text-blue-100, .text-blue-200 { color: #2a5568; }
+    .text-yellow-100, .text-yellow-200, .text-amber-100, .text-amber-200 { color: #684c12; }
+
+    /* 深灰字（600 以上）：灰階反向後變成淺色，改成深字；白底區塊裡用 base 層設好的 --cmurx-g*（深色那組灰階） */
+    .text-gray-600 { color: var(--cmurx-g600, var(--color-gray-500)); }
+    .text-gray-700 { color: var(--cmurx-g700, var(--color-gray-400)); }
+    .text-gray-800 { color: var(--cmurx-g800, var(--color-gray-200)); }
+    .text-gray-900 { color: var(--cmurx-g900, var(--color-gray-200)); }
+    .text-gray-950 { color: var(--cmurx-g950, var(--color-gray-200)); }
+    .disabled\:text-gray-600:disabled { color: #8d8573; }
+
+    /* 寫死的白字：顏色看最近一層有底色的祖先（base 層設的 --cmurx-on），深底白字、淺底深字 */
+    .text-white,
+    .hover\:text-white:hover,
+    .group:hover .group-hover\:text-white {
+      color: var(--cmurx-on, var(--color-gray-50));
+    }
+    [class*="text-white/"] { color: var(--cmurx-on-dim, var(--color-gray-400)); }
+    .text-red-400 { color: var(--cmurx-red, var(--color-red-400)); }
+  }
+}
+
+/* 淺色的預設值與「這塊底是深是淺」，放在 Tailwind 的 base 層：元素自己有 text-*／placeholder-* class 時以 class 為準。
+   每種底色在自己身上設 --cmurx-on（白字該用的顏色）等變數，變數會繼承、取最近一層祖先設的值，所以巢狀幾層都看得是最近的底色；
+   選擇器都包在 :where() 裡（不加權重），同一個元素兩種都有時，排在後面的深底贏 */
+@layer base {
+  @media (prefers-color-scheme: light) {
+    /* 輸入框的提示字：上游（Tailwind 預設）是字色的一半，淺色底只有 3 左右 */
+    :is(input, textarea)::placeholder {
+      color: var(--color-gray-500);
+    }
+    /* 淺底：卡片、輸入框、白底區塊。上面的白字改深字 */
+    :where([class^="bg-gray-"], [class*=" bg-gray-"], [class~="bg-white"], .modal-content) {
+      --cmurx-on: var(--color-gray-50);
+      --cmurx-on-dim: var(--color-gray-400);
+      --cmurx-red: initial;
+    }
+    /* 白底區塊：深灰字照深色主題那組（上面 unlayered 的那段把灰階換回來了） */
+    :where([class~="bg-white"], .modal-content) {
+      --cmurx-g600: var(--color-gray-600);
+      --cmurx-g700: var(--color-gray-700);
+      --cmurx-g800: var(--color-gray-800);
+      --cmurx-g900: var(--color-gray-900);
+      --cmurx-g950: var(--color-gray-950);
+    }
+    /* 深底的遮罩：彈窗遮罩、PDF 頁面預覽（按鈕直接放在上面）、縮圖上的頁碼標籤。只認整個字（hover:bg-black/10、bg-black/5 這類淡的不算）；
+       遮罩本身不設字色，裡面的卡片是淺底、會蓋回去 */
+    :where([class~="bg-black"], [class~="bg-black/40"], [class~="bg-black/50"], [class~="bg-black/60"], [class~="bg-black/70"],
+           [class~="bg-black/80"], [class~="bg-black/90"]) {
+      --cmurx-on: #fff;
+      --cmurx-on-dim: rgb(255 255 255 / 0.75);
+      --cmurx-red: #e08476;
+    }
+    /* 實心彩色底（按鈕、徽章；[class~=] 整個字比對，hover:bg-* 不算）：白字，沒寫字色時也是白字
+       （深色是繼承淺色的字、看得清楚，淺色繼承到的是深字） */
+    :where([class~="bg-indigo-500"], [class~="bg-indigo-600"], [class~="bg-indigo-700"], [class~="bg-green-600"], [class~="bg-green-700"],
+           [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-blue-500"], [class~="bg-blue-600"],
+           [class~="bg-orange-600"], [class~="bg-yellow-600"], [class*="bg-gradient-"], [class*="bg-linear-"], .cta-button, .btn-gradient) {
+      --cmurx-on: #fff;
+      --cmurx-on-dim: rgb(255 255 255 / 0.75);
+      --cmurx-red: #ffd9d2;
+      color: #fff;
+    }
+    /* 滑過才變主色底的按鈕：滑過時白字 */
+    :where([class~="hover:bg-indigo-500"], [class~="hover:bg-indigo-600"], [class~="hover:bg-indigo-700"]):hover {
+      --cmurx-on: #fff;
+    }
   }
 }

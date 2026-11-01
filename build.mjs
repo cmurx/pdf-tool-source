@@ -154,7 +154,21 @@ async function build() {
     console.warn(`[pdf-tool] 提醒：上游有 ${i18nMissing} 條英文介面文字還不在 i18n/zh-TW.json（會照樣顯示英文）。node build.mjs i18n-scan 列出來，翻好併進對照表`);
   }
   await checkPublicSource();
+  checkTheme();
   printPaths();
+}
+
+// 淺色主題的檢查（指南第 9.1 節）：上游新出現的顏色寫法、淺色下看不清楚的字。沒通過（或跑不起來，例如沒裝 playwright）就停在這裡，
+// worker 的 wrangler deploy 也會因為 out/theme-check.json 沒寫「通過」而擋下（test/deploy-gate.mjs）。
+// 檢查程式不在公開的原始碼裡（要用 CMURx 的 tools/design-check），公開 repo 重現建置時沒有這個檔，就略過
+function checkTheme() {
+  const script = join(HERE, 'test', 'theme-check.mjs');
+  if (!existsSync(script)) { log('沒有 test/theme-check.mjs，略過淺色主題的檢查'); return; }
+  const r = spawnSync(process.execPath, [script], { stdio: 'inherit', env: childEnv({ PDF_TOOL_WORK: WORK }) });
+  if (r.status !== 0) {
+    fail('建置輸出已經完成，但淺色主題的檢查沒通過或跑不起來（上面列了原因），部署會被擋下。'
+      + '修好後只要重跑 node test/theme-check.mjs，不用重新建置；部署指令用 node build.mjs paths 印');
+  }
 }
 
 // 部署的版本跟公開的原始碼要一致（AGPL）。只提醒不擋：換版本或改補丁時，先在本機建置、實測，確定要部署才更新公開 repo，
@@ -210,7 +224,7 @@ function publicReadme() {
 2. 把上游 \`public/libreoffice-wasm/browser.worker.global.js\` 換成 \`node_modules/@matbee/libreoffice-converter/dist/browser.worker.global.js\`（上游內附的舊版不支援注入字型）。
 3. [\`build.mjs\`](build.mjs) 開頭 \`BUILD_ENV\` 的建置設定（品牌名稱、預設語言、WASM 與字型改從同網域提供），以及 [\`security-headers.json\`](security-headers.json) 產生的安全標頭。
 4. [\`i18n/\`](i18n/)：上游寫死、沒走翻譯系統的英文介面換成繁體中文。\`build.mjs\` 把對照表 \`zh-TW.json\` 嵌進 \`translate.js\`，放在繁體中文與不帶語言的頁面 \`<head>\` 的第一個 script；介面語言是繁體中文時，畫面文字整段等於對照表的英文才換。\`scan.mjs\` 找出還沒翻的英文。
-5. [\`brand/\`](brand/)：CMURx 的圖示、把配色換成 CMURx 共用前端規範深色主題的 \`theme.css\`、導覽列小字與首頁引導的 \`brand.js\`，\`build.mjs\` 的 \`addBranding()\` 放進每個頁面。CMURx 的圖示是中國醫藥大學藥學系的標誌，不在 AGPL-3.0 授權範圍內。
+5. [\`brand/\`](brand/)：CMURx 的圖示、把配色換成 CMURx 共用前端規範深色與淺色主題（跟著裝置）的 \`theme.css\`、導覽列小字與首頁引導的 \`brand.js\`，\`build.mjs\` 的 \`addBranding()\` 放進每個頁面。CMURx 的圖示是中國醫藥大學藥學系的標誌，不在 AGPL-3.0 授權範圍內。
 
 ## 重現
 
@@ -300,7 +314,7 @@ function syncLibreOfficeWorker() {
   log(`LibreOffice worker 換成 @matbee/libreoffice-converter ${ver} 的版本（支援字型注入）`);
 }
 
-// CMURx 品牌（指南第 8 節）：圖示換成 CMURx 的、配色換成共用前端規範的深色（brand/theme.css）、導覽列小字與首頁引導（brand/brand.js）。
+// CMURx 品牌（指南第 8 節）：圖示換成 CMURx 的、配色換成共用前端規範的深色與淺色（brand/theme.css，跟著裝置）、導覽列小字與首頁引導（brand/brand.js）。
 // 跟繁中對照表一樣疊在上游頁面上、不改上游程式；CSS 與 JS 的檔名帶內容雜湊（Service Worker 會快取 .css／.js）。
 // 放進所有最上層的頁面（各語言都要換色），PDF.js 檢視器等子資料夾不放
 function addBranding() {
@@ -321,7 +335,10 @@ function addBranding() {
   };
   const css = hashed('theme.css', 'css');
   const js = hashed('brand.js', 'js');
-  const tags = `<link rel="stylesheet" href="${css}"><script defer src="${js}"></script>`;
+  // 瀏覽器網址列的顏色跟著裝置的淺色／深色（theme.css 的頁面底色）
+  const tags = '<meta name="theme-color" content="#211a13" media="(prefers-color-scheme: dark)">'
+    + '<meta name="theme-color" content="#f2ead9" media="(prefers-color-scheme: light)">'
+    + `<link rel="stylesheet" href="${css}"><script defer src="${js}"></script>`;
   let pages = 0;
   for (const f of listFiles(ASSETS_DIR)) {
     if (!/^(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[^/]+\.html$/.test(f.rel)) continue;
@@ -333,7 +350,7 @@ function addBranding() {
     writeFileSync(f.path, html);
     pages++;
   }
-  // 加到主畫面（PWA）時的名稱與顏色
+  // 加到主畫面（PWA）時的名稱與顏色。manifest 的顏色只能寫一個，用預設的深色（打開時的啟動畫面；進到頁面後照上面的 theme-color）
   const manifest = join(ASSETS_DIR, 'site.webmanifest');
   if (existsSync(manifest)) {
     const m = JSON.parse(readFileSync(manifest, 'utf8'));
